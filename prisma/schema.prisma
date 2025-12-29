@@ -1,0 +1,609 @@
+// Multi-tenant scheduling platform schema
+// Supports multiple organizations, programs, sites, and services
+
+generator client {
+  provider = "prisma-client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================================
+// AUTH & USER MANAGEMENT
+// ============================================================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  emailVerified DateTime?
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts      Account[]
+  sessions      Session[]
+  residents     Resident[]
+  auditLogs     AuditLog[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ============================================================================
+// ORGANIZATION LAYER
+// ============================================================================
+
+model Organization {
+  id          String    @id @default(cuid())
+  name        String
+  slug        String    @unique
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  programs    Program[]
+  sites       Site[]
+  services    Service[]
+
+  @@map("organizations")
+}
+
+model Site {
+  id             String    @id @default(cuid())
+  organizationId String
+  name           String
+  address        String?
+  timezone       String    @default("America/New_York")
+  active         Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  siteServices   SiteService[]
+  rotationBlocks RotationBlock[]
+  shiftTemplates ShiftTemplate[]
+  shiftInstances ShiftInstance[]
+  assignments    Assignment[]
+  ruleSets       RuleSet[]
+
+  @@map("sites")
+}
+
+model Service {
+  id             String    @id @default(cuid())
+  organizationId String
+  name           String
+  code           String
+  description    String?
+  active         Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  siteServices   SiteService[]
+  rotationBlocks RotationBlock[]
+  shiftTemplates ShiftTemplate[]
+  ruleSets       RuleSet[]
+
+  @@unique([organizationId, code])
+  @@map("services")
+}
+
+model SiteService {
+  id        String   @id @default(cuid())
+  siteId    String
+  serviceId String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  site      Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  service   Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, serviceId])
+  @@map("site_services")
+}
+
+// ============================================================================
+// PROGRAM LAYER
+// ============================================================================
+
+model Program {
+  id             String    @id @default(cuid())
+  organizationId String
+  name           String
+  code           String
+  description    String?
+  active         Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  programYears   ProgramYear[]
+  residents      Resident[]
+  callPools      CallPool[]
+  rotationBlocks RotationBlock[]
+  shiftTemplates ShiftTemplate[]
+  ruleSets       RuleSet[]
+  fairnessMetrics FairnessMetric[]
+  swapRequests   SwapRequest[]
+
+  @@unique([organizationId, code])
+  @@map("programs")
+}
+
+model ProgramYear {
+  id        String    @id @default(cuid())
+  programId String
+  year      Int       // PGY1 = 1, PGY2 = 2, etc.
+  name      String    // "PGY1", "PGY2", etc.
+  active    Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  program   Program   @relation(fields: [programId], references: [id], onDelete: Cascade)
+  residents Resident[]
+  ruleSets  RuleSet[]
+
+  @@unique([programId, year])
+  @@map("program_years")
+}
+
+model Resident {
+  id           String    @id @default(cuid())
+  userId       String
+  programId    String
+  programYearId String?
+  employeeId   String?   @unique
+  startDate    DateTime
+  endDate      DateTime?
+  active       Boolean   @default(true)
+  partTime     Boolean   @default(false)
+  accommodations String? @db.Text
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  program      Program   @relation(fields: [programId], references: [id], onDelete: Cascade)
+  programYear  ProgramYear? @relation(fields: [programYearId], references: [id])
+  callPools    CallPoolMember[]
+  rotationBlocks RotationBlock[]
+  availabilities Availability[]
+  assignments  Assignment[]
+  swapRequests SwapRequest[] @relation("SwapRequestResident")
+  swapRequestsReceived SwapRequest[] @relation("SwapRequestTarget")
+  preferences  Preference[]
+  fairnessStats FairnessStats[]
+
+  @@map("residents")
+}
+
+model CallPool {
+  id          String    @id @default(cuid())
+  programId   String
+  name        String
+  description String?
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  program     Program   @relation(fields: [programId], references: [id], onDelete: Cascade)
+  members     CallPoolMember[]
+  shiftTemplates ShiftTemplate[]
+  ruleSets    RuleSet[]
+  rotationBlocks RotationBlock[]
+
+  @@unique([programId, name])
+  @@map("call_pools")
+}
+
+model CallPoolMember {
+  id         String   @id @default(cuid())
+  callPoolId String
+  residentId String
+  startDate  DateTime @default(now())
+  endDate    DateTime?
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  callPool   CallPool @relation(fields: [callPoolId], references: [id], onDelete: Cascade)
+  resident   Resident @relation(fields: [residentId], references: [id], onDelete: Cascade)
+
+  @@unique([callPoolId, residentId])
+  @@map("call_pool_members")
+}
+
+model RotationBlock {
+  id          String    @id @default(cuid())
+  programId   String
+  residentId  String
+  siteId      String
+  serviceId   String
+  startDate   DateTime
+  endDate     DateTime
+  callPoolId  String?
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  program     Program   @relation(fields: [programId], references: [id], onDelete: Cascade)
+  resident    Resident  @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  site        Site      @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  service     Service   @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  callPool    CallPool? @relation(fields: [callPoolId], references: [id])
+
+  @@map("rotation_blocks")
+}
+
+// ============================================================================
+// SCHEDULING LAYER
+// ============================================================================
+
+model ShiftType {
+  id          String    @id @default(cuid())
+  name        String    // "Night", "24h", "Home call", "Weekend day", "Pager", "Backup"
+  code        String    @unique
+  description String?
+  durationHours Int?    // Duration in hours
+  pointsWeight Float    @default(1.0) // For fairness scoring
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  shiftTemplates ShiftTemplate[]
+  coverageRequirements CoverageRequirement[]
+  fairnessMetrics FairnessMetric[]
+
+  @@map("shift_types")
+}
+
+model ShiftTemplate {
+  id                String    @id @default(cuid())
+  programId         String
+  name              String
+  shiftTypeId       String
+  siteId            String?
+  serviceId         String?
+  callPoolId        String?
+  recurrencePattern String   @db.Text // JSON: { type: "daily|weekly|monthly", days: [], interval: 1 }
+  startTime         String   // "18:00"
+  endTime           String   // "06:00"
+  startDate         DateTime?
+  endDate           DateTime?
+  active            Boolean   @default(true)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  program           Program   @relation(fields: [programId], references: [id], onDelete: Cascade)
+  shiftType         ShiftType @relation(fields: [shiftTypeId], references: [id])
+  site              Site?     @relation(fields: [siteId], references: [id])
+  service           Service?  @relation(fields: [serviceId], references: [id])
+  callPool          CallPool? @relation(fields: [callPoolId], references: [id])
+  coverageRequirements CoverageRequirement[]
+  shiftInstances    ShiftInstance[]
+
+  @@map("shift_templates")
+}
+
+model CoverageRequirement {
+  id              String    @id @default(cuid())
+  shiftTemplateId String
+  role            String    // "Primary", "Backup", "Consult", etc.
+  count           Int       @default(1)
+  shiftTypeId     String?   // If different from template shift type
+  priority        Int       @default(1) // 1 = required, 2 = preferred, etc.
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  shiftTemplate   ShiftTemplate @relation(fields: [shiftTemplateId], references: [id], onDelete: Cascade)
+  shiftType       ShiftType?    @relation(fields: [shiftTypeId], references: [id])
+
+  @@map("coverage_requirements")
+}
+
+model ShiftInstance {
+  id              String    @id @default(cuid())
+  shiftTemplateId String
+  date            DateTime
+  startTime       DateTime
+  endTime         DateTime
+  siteId          String?
+  status          String    @default("draft") // "draft", "published", "locked"
+  generatedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  shiftTemplate   ShiftTemplate @relation(fields: [shiftTemplateId], references: [id], onDelete: Cascade)
+  site            Site?         @relation(fields: [siteId], references: [id])
+  assignments     Assignment[]
+  constraintEvaluations ConstraintEvaluation[]
+
+  @@unique([shiftTemplateId, date])
+  @@map("shift_instances")
+}
+
+model Assignment {
+  id              String    @id @default(cuid())
+  shiftInstanceId String
+  residentId      String
+  siteId          String
+  role            String    @default("Primary")
+  status          String    @default("assigned") // "assigned", "swapped", "overridden"
+  explanation     String?   @db.Text // Why this assignment was made
+  assignedBy      String?   // User ID or "system"
+  assignedAt      DateTime  @default(now())
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  shiftInstance   ShiftInstance @relation(fields: [shiftInstanceId], references: [id], onDelete: Cascade)
+  resident        Resident      @relation(fields: [residentId], references: [id], onDelete: Cascade)
+  site            Site          @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  swapRequests    SwapRequest[]
+  exceptionOverrides ExceptionOverride[]
+  constraintEvaluations ConstraintEvaluation[]
+
+  @@map("assignments")
+}
+
+// ============================================================================
+// CONSTRAINTS AND PREFERENCES LAYER
+// ============================================================================
+
+model Availability {
+  id          String    @id @default(cuid())
+  residentId  String
+  type        String    // "vacation", "post_call_protection", "academic_day", "leave", "unavailable"
+  startDate   DateTime
+  endDate     DateTime
+  startTime   String?   // "09:00" if partial day
+  endTime     String?   // "17:00" if partial day
+  reason      String?
+  approved    Boolean   @default(false)
+  approvedBy  String?
+  approvedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  resident    Resident  @relation(fields: [residentId], references: [id], onDelete: Cascade)
+
+  @@map("availabilities")
+}
+
+model RuleSet {
+  id          String    @id @default(cuid())
+  name        String
+  description String?
+  programId   String?
+  siteId      String?
+  serviceId   String?
+  callPoolId  String?
+  programYearId String?
+  active      Boolean   @default(true)
+  priority    Int       @default(1) // Higher priority rules evaluated first
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  program     Program?  @relation(fields: [programId], references: [id], onDelete: Cascade)
+  site        Site?    @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  service     Service? @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  callPool    CallPool? @relation(fields: [callPoolId], references: [id], onDelete: Cascade)
+  programYear ProgramYear? @relation(fields: [programYearId], references: [id], onDelete: Cascade)
+  constraints ConstraintDefinition[]
+
+  @@map("rule_sets")
+}
+
+model ConstraintDefinition {
+  id          String    @id @default(cuid())
+  ruleSetId   String
+  name        String
+  type        String    // "hard" or "soft"
+  pluginType  String    // "max_shifts_per_period", "min_rest_between", "no_consecutive_24h", etc.
+  parameters  Json      // JSON config for the constraint
+  weight      Float?    // For soft constraints
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  ruleSet     RuleSet   @relation(fields: [ruleSetId], references: [id], onDelete: Cascade)
+  evaluations ConstraintEvaluation[]
+
+  @@map("constraint_definitions")
+}
+
+model ConstraintEvaluation {
+  id                    String    @id @default(cuid())
+  constraintDefinitionId String
+  shiftInstanceId       String?
+  assignmentId          String?
+  residentId            String?
+  violationType         String    // "hard_violation", "soft_penalty"
+  severity              Float     // 0.0 to 1.0 for soft, 1.0 for hard
+  message               String    @db.Text
+  metadata              Json?     // Additional context
+  evaluatedAt           DateTime  @default(now())
+
+  constraintDefinition  ConstraintDefinition @relation(fields: [constraintDefinitionId], references: [id], onDelete: Cascade)
+  shiftInstance         ShiftInstance?       @relation(fields: [shiftInstanceId], references: [id], onDelete: Cascade)
+  assignment            Assignment?          @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  @@map("constraint_evaluations")
+}
+
+model Preference {
+  id          String    @id @default(cuid())
+  residentId  String
+  type        String    // "avoid_day", "prefer_call_type", "prefer_site", etc.
+  target      String    // Day of week, shift type, site ID, etc.
+  weight      Float     @default(1.0)
+  startDate   DateTime?
+  endDate     DateTime?
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  resident    Resident  @relation(fields: [residentId], references: [id], onDelete: Cascade)
+
+  @@map("preferences")
+}
+
+model FairnessMetric {
+  id          String    @id @default(cuid())
+  programId   String
+  name        String
+  type        String    // "points", "weekends", "nights", "holidays", "site_travel", "backup"
+  shiftTypeId String?
+  weight      Float     @default(1.0)
+  targetValue Float?    // Target per resident (e.g., 4 weekends per month)
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  program     Program   @relation(fields: [programId], references: [id], onDelete: Cascade)
+  shiftType   ShiftType? @relation(fields: [shiftTypeId], references: [id])
+
+  @@map("fairness_metrics")
+}
+
+model FairnessStats {
+  id              String    @id @default(cuid())
+  residentId      String
+  periodStart     DateTime
+  periodEnd       DateTime
+  totalPoints     Float     @default(0)
+  nightsCount     Int       @default(0)
+  weekendsCount   Int       @default(0)
+  holidaysCount   Int       @default(0)
+  siteTravelCount Int       @default(0)
+  backupCount     Int       @default(0)
+  metadata        Json?     // Additional metrics
+  calculatedAt    DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  resident        Resident  @relation(fields: [residentId], references: [id], onDelete: Cascade)
+
+  @@unique([residentId, periodStart, periodEnd])
+  @@map("fairness_stats")
+}
+
+// ============================================================================
+// WORKFLOW LAYER
+// ============================================================================
+
+model SwapRequest {
+  id              String    @id @default(cuid())
+  programId       String
+  requesterId     String    // Resident requesting swap
+  targetId        String?   // Resident to swap with (optional for open swap)
+  assignmentId    String    // Assignment to swap
+  targetAssignmentId String? // Target assignment (if specific swap)
+  reason          String?   @db.Text
+  status          String    @default("pending") // "pending", "approved", "rejected", "cancelled"
+  preCheckPassed  Boolean   @default(false)
+  preCheckResults Json?     // Constraint evaluation results
+  approvedBy      String?
+  approvedAt      DateTime?
+  rejectedBy      String?
+  rejectedAt      DateTime?
+  rejectionReason String?   @db.Text
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  program         Program   @relation(fields: [programId], references: [id], onDelete: Cascade)
+  requester       Resident  @relation("SwapRequestResident", fields: [requesterId], references: [id], onDelete: Cascade)
+  target          Resident? @relation("SwapRequestTarget", fields: [targetId], references: [id])
+  assignment      Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  approvals       SwapApproval[]
+
+  @@map("swap_requests")
+}
+
+model SwapApproval {
+  id            String    @id @default(cuid())
+  swapRequestId String
+  approverRole  String    // "chief", "admin", "service_lead"
+  approverId    String?   // User ID if specific approver
+  status        String    @default("pending") // "pending", "approved", "rejected"
+  comment       String?   @db.Text
+  approvedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  swapRequest   SwapRequest @relation(fields: [swapRequestId], references: [id], onDelete: Cascade)
+
+  @@map("swap_approvals")
+}
+
+model ExceptionOverride {
+  id            String    @id @default(cuid())
+  assignmentId  String
+  reason        String    @db.Text
+  overriddenBy  String    // User ID
+  constraintViolations Json? // Which constraints were overridden
+  createdAt     DateTime  @default(now())
+
+  assignment    Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  @@map("exception_overrides")
+}
+
+model AuditLog {
+  id          String    @id @default(cuid())
+  userId      String?
+  action      String    // "create", "update", "delete", "assign", "swap", "publish", etc.
+  entityType  String    // "Assignment", "ShiftInstance", "SwapRequest", etc.
+  entityId    String
+  changes     Json?     // Before/after state
+  metadata    Json?     // Additional context
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime  @default(now())
+
+  user        User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
