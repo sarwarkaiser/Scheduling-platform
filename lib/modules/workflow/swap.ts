@@ -3,6 +3,8 @@
 import { prisma } from '@/lib/prisma'
 import { ValidationModule } from '../scheduling/validation'
 import type { ScheduleState } from '@/lib/types/scheduling'
+import { ConstraintManager } from '../constraints/manager'
+import { MaxConsecutiveShiftsPlugin } from '../constraints/plugins/max-consecutive'
 
 export interface SwapRequestInput {
   requesterId: string
@@ -14,9 +16,12 @@ export interface SwapRequestInput {
 
 export class SwapWorkflowModule {
   private validation: ValidationModule
+  private constraints: ConstraintManager
 
   constructor() {
     this.validation = new ValidationModule()
+    this.constraints = new ConstraintManager()
+    this.constraints.register(MaxConsecutiveShiftsPlugin)
   }
 
   async createSwapRequest(input: SwapRequestInput) {
@@ -59,7 +64,7 @@ export class SwapWorkflowModule {
     return swapRequest
   }
 
-  private async preCheckSwap(input: SwapRequestInput) {
+  async preCheckSwap(input: SwapRequestInput) {
     // Get both assignments
     const sourceAssignment = await prisma.assignment.findUnique({
       where: { id: input.assignmentId },
@@ -96,29 +101,96 @@ export class SwapWorkflowModule {
         return { passed: false, errors: ['Residents must be in same program'] }
       }
 
+      // Fetch relevant assignments for context (e.g. +/- 14 days)
+      const bufferStart = new Date(sourceAssignment.shiftInstance?.date || new Date())
+      bufferStart.setDate(bufferStart.getDate() - 14)
+      const bufferEnd = new Date(sourceAssignment.shiftInstance?.date || new Date())
+      bufferEnd.setDate(bufferEnd.getDate() + 14)
+
+      const contextAssignments = await prisma.assignment.findMany({
+        where: {
+          residentId: { in: [sourceAssignment.residentId, targetAssignment.residentId] },
+          shiftInstance: {
+            date: {
+              gte: bufferStart,
+              lte: bufferEnd
+            }
+          },
+          status: 'assigned'
+        },
+        include: { shiftInstance: true }
+      })
+
       // Build schedule state for validation
+      // We cast to any because we are building a partial state sufficient for validation
       const scheduleState: ScheduleState = {
-        assignments: [sourceAssignment, targetAssignment],
-        shiftInstances: [sourceAssignment.shiftInstance, targetAssignment.shiftInstance],
-        residents: [sourceAssignment.resident, targetAssignment.resident],
-        periodStart: new Date(),
-        periodEnd: new Date(),
+        assignments: contextAssignments as any,
+        shiftInstances: contextAssignments.map(a => a.shiftInstance) as any,
+        residents: [sourceAssignment.resident, targetAssignment.resident] as any,
+        periodStart: bufferStart,
+        periodEnd: bufferEnd,
+      }
+
+      // Fetch and apply active constraints for the program
+      const ruleSets = await prisma.ruleSet.findMany({
+        where: {
+          programId: sourceAssignment.resident.programId,
+          active: true
+        },
+        include: {
+          constraints: {
+            where: { active: true }
+          }
+        }
+      })
+
+      // Configure manager with DB rules
+      for (const ruleSet of ruleSets) {
+        for (const constraint of ruleSet.constraints) {
+          this.constraints.configure(constraint.pluginType, constraint.parameters)
+        }
       }
 
       // Simulate swap
+      // The swapped assignments technically need to match Assignment interface
       const swappedAssignments = [
-        { ...sourceAssignment, residentId: targetAssignment.residentId },
-        { ...targetAssignment, residentId: sourceAssignment.residentId },
+        { ...sourceAssignment, residentId: targetAssignment.residentId, resident: targetAssignment.resident },
+        { ...targetAssignment, residentId: sourceAssignment.residentId, resident: sourceAssignment.resident },
       ]
 
-      // Validate constraints
+      // Validate constraints (Legacy)
       const violations = await this.validation.validate(swappedAssignments as any, scheduleState)
 
+      // Validate constraints (New Plugin System)
+      const constraintViolations: string[] = [];
+
+      // Check for source resident (who is taking target's assignment)
+      const sourceCheck = await this.constraints.validateAll({
+        resident: sourceAssignment.resident as any,
+        shift: targetAssignment.shiftInstance as any,
+        assignments: [...swappedAssignments, ...scheduleState.assignments.filter(a => ![sourceAssignment.id, targetAssignment.id].includes(a.id))].filter(a => a.residentId === sourceAssignment.resident.id) as any,
+        periodStart: scheduleState.periodStart,
+        periodEnd: scheduleState.periodEnd
+      })
+      if (!sourceCheck.success && sourceCheck.reason) constraintViolations.push(`Source: ${sourceCheck.reason}`);
+
+      // Check for target resident (who is taking source's assignment)
+      const targetCheck = await this.constraints.validateAll({
+        resident: targetAssignment.resident as any,
+        shift: sourceAssignment.shiftInstance as any,
+        assignments: [...swappedAssignments, ...scheduleState.assignments.filter(a => ![sourceAssignment.id, targetAssignment.id].includes(a.id))].filter(a => a.residentId === targetAssignment.resident.id) as any,
+        periodStart: scheduleState.periodStart,
+        periodEnd: scheduleState.periodEnd
+      })
+      if (!targetCheck.success && targetCheck.reason) constraintViolations.push(`Target: ${targetCheck.reason}`);
+
+
       const hardViolations = violations.filter(v => v.type === 'hard')
-      if (hardViolations.length > 0) {
+
+      if (hardViolations.length > 0 || constraintViolations.length > 0) {
         return {
           passed: false,
-          errors: hardViolations.map(v => v.message),
+          errors: [...hardViolations.map(v => v.message), ...constraintViolations],
           violations: hardViolations,
         }
       }
@@ -127,6 +199,65 @@ export class SwapWorkflowModule {
         passed: true,
         warnings: violations.filter(v => v.type === 'soft').map(v => v.message),
       }
+    } else if (input.targetId) {
+      // Give Away / Pick Up Scenario
+      // Source resident gives assignment to Target resident (who has no assignment to swap back)
+
+      const targetResident = await prisma.resident.findUnique({ where: { id: input.targetId } })
+      if (!targetResident) return { passed: false, errors: ['Target resident not found'] }
+
+      // 1. Fetch context for both
+      const bufferStart = new Date(sourceAssignment.shiftInstance?.date || new Date())
+      bufferStart.setDate(bufferStart.getDate() - 14)
+      const bufferEnd = new Date(sourceAssignment.shiftInstance?.date || new Date())
+      bufferEnd.setDate(bufferEnd.getDate() + 14)
+
+      const contextAssignments = await prisma.assignment.findMany({
+        where: {
+          residentId: { in: [sourceAssignment.residentId, targetResident.id] },
+          shiftInstance: {
+            date: { gte: bufferStart, lte: bufferEnd }
+          },
+          status: 'assigned'
+        },
+        include: { shiftInstance: true }
+      })
+
+      // 2. Load constraints
+      const ruleSets = await prisma.ruleSet.findMany({
+        where: {
+          programId: sourceAssignment.resident.programId,
+          active: true
+        },
+        include: { constraints: { where: { active: true } } }
+      })
+
+      for (const ruleSet of ruleSets) {
+        for (const constraint of ruleSet.constraints) {
+          this.constraints.configure(constraint.pluginType, constraint.parameters)
+        }
+      }
+
+      const constraintViolations: string[] = []
+
+      // 3. Validate Target (Taking the shift)
+      // They get sourceAssignment.shiftInstance
+      const targetCheck = await this.constraints.validateAll({
+        resident: targetResident as any,
+        shift: sourceAssignment.shiftInstance as any,
+        // Context: Their existing assignments + New Assignment
+        assignments: [...contextAssignments.filter(a => a.residentId === targetResident.id), { ...sourceAssignment, residentId: targetResident.id }] as any,
+        periodStart: bufferStart,
+        periodEnd: bufferEnd
+      })
+
+      if (!targetCheck.success && targetCheck.reason) constraintViolations.push(`Target: ${targetCheck.reason}`)
+
+      if (constraintViolations.length > 0) {
+        return { passed: false, errors: constraintViolations }
+      }
+
+      return { passed: true }
     }
 
     // Open swap - just check if requester can be swapped out

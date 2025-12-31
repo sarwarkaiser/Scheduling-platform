@@ -6,6 +6,9 @@ export interface ScheduleState {
   residents: Resident[]
   periodStart: Date
   periodEnd: Date
+  // New fields for constraints
+  ruleSets?: any[]
+  availabilities?: any[]
 }
 
 export interface Assignment {
@@ -71,6 +74,7 @@ export interface SolverResult {
   score: number
   explanations: AssignmentExplanation[]
   unassignedShifts: UnassignedShift[]
+  shiftInstances: ShiftInstance[]
 }
 
 export interface AssignmentExplanation {

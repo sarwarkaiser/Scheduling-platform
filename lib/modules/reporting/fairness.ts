@@ -53,6 +53,20 @@ export class FairnessModule {
       },
     })
 
+    // Fetch holidays in period
+    const holidays = await prisma.holiday.findMany({
+      where: {
+        programId: options.programId,
+        date: {
+          gte: options.periodStart,
+          lte: options.periodEnd,
+        },
+      },
+    });
+
+    // Create a set of holiday date strings (YYYY-MM-DD) for O(1) lookup
+    const holidayDates = new Set(holidays.map((h: { date: Date }) => h.date.toISOString().split('T')[0]));
+
     // Calculate stats per resident
     for (const resident of residents) {
       const residentAssignments = assignments.filter(
@@ -88,8 +102,10 @@ export class FairnessModule {
           weekendsCount++
         }
 
-        // Count holidays (simplified - would need holiday calendar)
-        // holidaysCount += this.isHoliday(shiftDate) ? 1 : 0
+        // Count holidays based on DB
+        if (holidayDates.has(shiftDate.toISOString().split('T')[0])) {
+          holidaysCount++;
+        }
 
         // Track site visits
         if (assignment.siteId) {

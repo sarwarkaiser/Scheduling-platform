@@ -12,26 +12,12 @@ export interface EligibilityOptions {
 export class EligibilityModule {
   async calculateEligibility(
     shiftInstance: any,
+    residents: any[], // Pre-fetched residents
     options: EligibilityOptions
   ): Promise<EligibilityResult[]> {
     const results: EligibilityResult[] = []
 
-    // Get all residents in the program
-    const residents = await prisma.resident.findMany({
-      where: {
-        programId: options.programId,
-        active: true,
-      },
-      include: {
-        callPools: {
-          include: {
-            callPool: true,
-          },
-        },
-        rotationBlocks: true,
-        availabilities: true,
-      },
-    })
+    // Residents are now passed in, avoiding N+1 query
 
     for (const resident of residents) {
       const reasons: string[] = []

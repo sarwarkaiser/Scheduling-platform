@@ -14,9 +14,9 @@ export class ValidationModule {
     // Get all active rule sets for the program
     const programId = assignments[0]?.residentId
       ? (await prisma.resident.findUnique({
-          where: { id: assignments[0].residentId },
-          select: { programId: true },
-        }))?.programId
+        where: { id: assignments[0].residentId },
+        select: { programId: true },
+      }))?.programId
       : null
 
     if (!programId) return violations
@@ -56,7 +56,7 @@ export class ValidationModule {
 
           if (result.violated) {
             violations.push({
-              type: constraintDef.type,
+              type: constraintDef.type as "hard" | "soft",
               severity: result.severity,
               message: result.message,
               constraintId: constraintDef.id,

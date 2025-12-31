@@ -3,6 +3,7 @@
 
 generator client {
   provider = "prisma-client"
+  output   = "../lib/generated/client"
 }
 
 datasource db {
@@ -13,12 +14,20 @@ datasource db {
 // AUTH & USER MANAGEMENT
 // ============================================================================
 
+enum Role {
+  ADMIN
+  CHIEF
+  RESIDENT
+}
+
 model User {
   id            String    @id @default(cuid())
   email         String    @unique
   name          String?
   emailVerified DateTime?
   image         String?
+  password      String?   // Hashed password
+  role          Role      @default(RESIDENT)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -166,6 +175,7 @@ model Program {
   shiftTemplates ShiftTemplate[]
   ruleSets       RuleSet[]
   fairnessMetrics FairnessMetric[]
+  holidays       Holiday[]
   swapRequests   SwapRequest[]
 
   @@unique([organizationId, code])
@@ -525,6 +535,20 @@ model FairnessStats {
 
   @@unique([residentId, periodStart, periodEnd])
   @@map("fairness_stats")
+}
+
+model Holiday {
+  id        String   @id @default(cuid())
+  programId String
+  name      String
+  date      DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  program   Program  @relation(fields: [programId], references: [id], onDelete: Cascade)
+
+  @@unique([programId, date])
+  @@map("holidays")
 }
 
 // ============================================================================

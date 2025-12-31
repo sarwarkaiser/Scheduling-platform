@@ -1,14 +1,19 @@
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient } from './generated/client/client'
+import { Pool } from 'pg'
+import { PrismaPg } from '@prisma/adapter-pg'
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
 }
 
+const connectionString = process.env.DATABASE_URL
+const pool = new Pool({ connectionString })
+const adapter = new PrismaPg(pool)
+
 export const prisma =
   globalForPrisma.prisma ??
   new PrismaClient({
-    // Prisma 7 reads DATABASE_URL from environment automatically
-    // or you can pass it via adapter or connection string
+    adapter,
     log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
   })
 
