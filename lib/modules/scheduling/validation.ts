@@ -43,7 +43,11 @@ export class ValidationModule {
 
       for (const ruleSet of ruleSets) {
         for (const constraintDef of ruleSet.constraints) {
-          const plugin = constraintRegistry.get(constraintDef.pluginType)
+          const plugin =
+            constraintRegistry.get(constraintDef.pluginType) ||
+            (constraintDef.pluginType === 'min_rest_between_shifts'
+              ? constraintRegistry.get('min_rest_between')
+              : undefined)
           if (!plugin) continue
 
           const result = plugin.evaluate({

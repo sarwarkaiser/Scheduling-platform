@@ -8,10 +8,13 @@ export default withAuth(
         const token = req.nextauth.token
         const isAuth = !!token
         const isAuthPage = req.nextUrl.pathname.startsWith("/login")
+        const isAdminRoute = req.nextUrl.pathname.startsWith("/admin")
+        const isDashboardRoute = req.nextUrl.pathname.startsWith("/dashboard")
 
         if (isAuthPage) {
             if (isAuth) {
-                return NextResponse.redirect(new URL("/admin", req.url))
+                const redirectPath = token?.role === "RESIDENT" ? "/dashboard" : "/admin"
+                return NextResponse.redirect(new URL(redirectPath, req.url))
             }
             return null
         }
@@ -28,18 +31,12 @@ export default withAuth(
         }
 
         // Role based protection
-        if (req.nextUrl.pathname.startsWith("/admin")) {
-            // Example: Only ADMIN or CHIEF can access /admin routes
-            // For MVP, if they are logged in, let them viewing the dashboard, 
-            // but maybe restrict specific sub-routes?
-            // Requirement: "residents limited to viewing their schedules"
+        if (isAdminRoute && token?.role === "RESIDENT") {
+            return NextResponse.redirect(new URL("/dashboard", req.url))
+        }
 
-            // If resident tries to access admin settings:
-            if (token?.role === "RESIDENT" &&
-                (req.nextUrl.pathname.startsWith("/admin/organizations") ||
-                    req.nextUrl.pathname.startsWith("/admin/programs"))) {
-                return NextResponse.redirect(new URL("/admin/files/unauthorized", req.url)) // or just 403
-            }
+        if (isDashboardRoute && token?.role !== "RESIDENT") {
+            return NextResponse.redirect(new URL("/admin", req.url))
         }
     },
     {
@@ -55,5 +52,5 @@ export default withAuth(
 )
 
 export const config = {
-    matcher: ["/admin/:path*", "/api/((?!auth).*)"],
+    matcher: ["/admin/:path*", "/dashboard/:path*", "/api/((?!auth).*)"],
 }

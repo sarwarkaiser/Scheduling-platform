@@ -5,16 +5,37 @@ import { useState } from "react";
 
 // Types for constraints to help the UI
 const CONSTRAINT_TYPES = [
-    { value: "hard", label: "Hard Constraint (Must follow)" },
-    { value: "soft", label: "Soft Constraint (Prefer to follow)" },
+    { value: "hard", label: "Hard (must follow)" },
+    { value: "soft", label: "Soft (prefer to follow)" },
 ];
 
 const PLUGINS = [
-    { value: "max_shifts_per_period", label: "Max Shifts Per Period (e.g., Month)" },
-    { value: "min_rest_between_shifts", label: "Min Rest Between Shifts" },
-    { value: "max_consecutive_shifts", label: "Max Consecutive Shifts" },
-    { value: "no_overlapping_shifts", label: "No Overlapping Shifts" },
+    {
+        value: "max_shifts_per_period",
+        label: "Limit shifts in a time window",
+        help: "Example: 5 shifts per 28 days",
+    },
+    {
+        value: "min_rest_between",
+        label: "Require rest between shifts",
+        help: "Example: 10 hours of rest",
+    },
+    {
+        value: "max_consecutive_shifts",
+        label: "Limit consecutive days",
+        help: "Example: no more than 3 in a row",
+    },
+    {
+        value: "no_consecutive_24h",
+        label: "Block back-to-back 24h shifts",
+        help: "Prevents consecutive 24-hour assignments",
+    },
 ];
+
+const LEGACY_PLUGIN_LABELS: Record<string, string> = {
+    min_rest_between_shifts: "Require rest between shifts",
+    no_overlapping_shifts: "No overlapping shifts",
+};
 
 export default function RulesManager({
     ruleSets,
@@ -35,7 +56,10 @@ export default function RulesManager({
     // Form State for Constraint
     const [name, setName] = useState("");
     const [pluginType, setPluginType] = useState(PLUGINS[0].value);
-    const [parameters, setParameters] = useState("{}");
+    const [maxShifts, setMaxShifts] = useState(5);
+    const [periodDays, setPeriodDays] = useState(28);
+    const [minRestHours, setMinRestHours] = useState(10);
+    const [maxConsecutive, setMaxConsecutive] = useState(3);
 
     // AI Assist State
     const [showAiAssist, setShowAiAssist] = useState(false);
@@ -51,14 +75,61 @@ export default function RulesManager({
     function handlePluginChange(plugin: string) {
         setPluginType(plugin);
         if (plugin === "max_shifts_per_period") {
-            setParameters('{\n  "max": 4,\n  "period": "month"\n}');
-        } else if (plugin === "min_rest_between_shifts") {
-            setParameters('{\n  "hours": 10\n}');
+            setMaxShifts(5);
+            setPeriodDays(28);
+            if (!name) setName("Max shifts per period");
+        } else if (plugin === "min_rest_between") {
+            setMinRestHours(10);
+            if (!name) setName("Minimum rest between shifts");
         } else if (plugin === "max_consecutive_shifts") {
-            setParameters('{\n  "max": 3\n}');
-        } else {
-            setParameters("{}");
+            setMaxConsecutive(3);
+            if (!name) setName("Max consecutive shifts");
+        } else if (plugin === "no_consecutive_24h") {
+            if (!name) setName("No consecutive 24h shifts");
         }
+    }
+
+    function buildParameters() {
+        if (pluginType === "max_shifts_per_period") {
+            return {
+                maxShifts,
+                periodDays,
+                // Backward compatibility with older solver expectations
+                max: maxShifts,
+            };
+        }
+        if (pluginType === "min_rest_between") {
+            return {
+                minRestHours,
+                // Backward compatibility with older solver expectations
+                hours: minRestHours,
+            };
+        }
+        if (pluginType === "max_consecutive_shifts") {
+            return { max: maxConsecutive };
+        }
+        return {};
+    }
+
+    function summarizeParameters(plugin: string, params: any) {
+        if (plugin === "max_shifts_per_period") {
+            const max = params.maxShifts ?? params.max ?? 4;
+            const period = params.periodDays ?? params.period ?? 7;
+            return `Max ${max} shifts per ${period} days`;
+        }
+        if (plugin === "min_rest_between" || plugin === "min_rest_between_shifts") {
+            return `At least ${params.minRestHours ?? params.hours} hours of rest between shifts`;
+        }
+        if (plugin === "max_consecutive_shifts") {
+            return `No more than ${params.max} consecutive shifts`;
+        }
+        if (plugin === "no_consecutive_24h") {
+            return "No back-to-back 24-hour shifts";
+        }
+        if (plugin === "no_overlapping_shifts") {
+            return "No overlapping shifts";
+        }
+        return "Custom rule configuration";
     }
 
     async function handleAiProcess() {
@@ -75,7 +146,8 @@ export default function RulesManager({
             const maxShiftsMatch = prompt.match(/max.*?(\d+).*?shifts/);
             if (maxShiftsMatch) {
                 setPluginType("max_shifts_per_period");
-                setParameters(JSON.stringify({ max: parseInt(maxShiftsMatch[1]), period: "month" }, null, 2));
+                setMaxShifts(parseInt(maxShiftsMatch[1]));
+                setPeriodDays(28);
                 setName(`Max ${maxShiftsMatch[1]} Shifts/Month`);
                 matched = true;
             }
@@ -83,8 +155,8 @@ export default function RulesManager({
             // Heuristic 2: Rest time
             const restMatch = prompt.match(/(\d+).*?hours.*?rest/);
             if (!matched && restMatch) {
-                setPluginType("min_rest_between_shifts");
-                setParameters(JSON.stringify({ hours: parseInt(restMatch[1]) }, null, 2));
+                setPluginType("min_rest_between");
+                setMinRestHours(parseInt(restMatch[1]));
                 setName(`Min ${restMatch[1]}h Rest`);
                 matched = true;
             }
@@ -93,7 +165,7 @@ export default function RulesManager({
             const consecMatch = prompt.match(/(\d+).*?consecutive/);
             if (!matched && consecMatch) {
                 setPluginType("max_consecutive_shifts");
-                setParameters(JSON.stringify({ max: parseInt(consecMatch[1]) }, null, 2));
+                setMaxConsecutive(parseInt(consecMatch[1]));
                 setName(`Max ${consecMatch[1]} Consecutive`);
                 matched = true;
             }
@@ -119,15 +191,16 @@ export default function RulesManager({
         formData.append("ruleSetId", selectedRuleSet);
         formData.append("name", name); // Use state
         formData.append("pluginType", pluginType); // Use state
-        formData.append("parameters", parameters); // Use state
+        formData.append("parameters", JSON.stringify(buildParameters())); // Use state
         await createConstraint(formData);
         setIsAddingConstraint(false);
         // Reset
         setName("");
-        setParameters("{}");
     }
 
     const activeRuleSet = ruleSets.find((rs) => rs.id === selectedRuleSet);
+    const activePlugin = PLUGINS.find((p) => p.value === pluginType);
+    const parameterPreview = summarizeParameters(pluginType, buildParameters());
 
     return (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -297,17 +370,69 @@ export default function RulesManager({
                                                 >
                                                     {PLUGINS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
                                                 </select>
+                                                {activePlugin?.help && (
+                                                    <p className="mt-1 text-[11px] text-gray-500">{activePlugin.help}</p>
+                                                )}
                                             </div>
                                         </div>
                                         <div>
-                                            <label className="block text-xs font-medium dark:text-gray-300">Configuration (JSON)</label>
-                                            <textarea
-                                                value={parameters}
-                                                onChange={(e) => setParameters(e.target.value)}
-                                                className="w-full rounded border p-2 text-sm font-mono h-24 dark:bg-gray-700 dark:border-gray-600"
-                                                name="parameters"
-                                            />
-                                            <p className="text-xs text-gray-500 mt-1">Configure limits here.</p>
+                                            <label className="block text-xs font-medium dark:text-gray-300">Settings</label>
+                                            <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                                {pluginType === "max_shifts_per_period" && (
+                                                    <>
+                                                        <div>
+                                                            <label className="block text-[11px] font-medium text-gray-500">Max shifts</label>
+                                                            <input
+                                                                type="number"
+                                                                min={1}
+                                                                value={maxShifts}
+                                                                onChange={(e) => setMaxShifts(Number(e.target.value))}
+                                                                className="w-full rounded border p-2 text-sm dark:bg-gray-700 dark:border-gray-600"
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <label className="block text-[11px] font-medium text-gray-500">Period (days)</label>
+                                                            <input
+                                                                type="number"
+                                                                min={1}
+                                                                value={periodDays}
+                                                                onChange={(e) => setPeriodDays(Number(e.target.value))}
+                                                                className="w-full rounded border p-2 text-sm dark:bg-gray-700 dark:border-gray-600"
+                                                            />
+                                                        </div>
+                                                    </>
+                                                )}
+                                                {pluginType === "min_rest_between" && (
+                                                    <div>
+                                                        <label className="block text-[11px] font-medium text-gray-500">Minimum rest (hours)</label>
+                                                        <input
+                                                            type="number"
+                                                            min={1}
+                                                            value={minRestHours}
+                                                            onChange={(e) => setMinRestHours(Number(e.target.value))}
+                                                            className="w-full rounded border p-2 text-sm dark:bg-gray-700 dark:border-gray-600"
+                                                        />
+                                                    </div>
+                                                )}
+                                                {pluginType === "max_consecutive_shifts" && (
+                                                    <div>
+                                                        <label className="block text-[11px] font-medium text-gray-500">Max consecutive days</label>
+                                                        <input
+                                                            type="number"
+                                                            min={1}
+                                                            value={maxConsecutive}
+                                                            onChange={(e) => setMaxConsecutive(Number(e.target.value))}
+                                                            className="w-full rounded border p-2 text-sm dark:bg-gray-700 dark:border-gray-600"
+                                                        />
+                                                    </div>
+                                                )}
+                                                {pluginType === "no_consecutive_24h" && (
+                                                    <div className="text-xs text-gray-500">
+                                                        This rule has no extra settings.
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <p className="text-xs text-gray-500 mt-2">Preview: {parameterPreview}</p>
                                         </div>
                                         <div className="flex justify-end gap-2">
                                             <button type="button" onClick={() => setIsAddingConstraint(false)} className="text-sm px-3 py-1 bg-gray-100 rounded hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200">Cancel</button>
@@ -332,11 +457,11 @@ export default function RulesManager({
                                             </span>
                                         </div>
                                         <div className="text-xs text-gray-500 mt-1">
-                                            Type: {c.pluginType}
+                                            {PLUGINS.find(p => p.value === c.pluginType)?.label || LEGACY_PLUGIN_LABELS[c.pluginType] || c.pluginType}
                                         </div>
-                                        <pre className="text-xs text-gray-400 mt-1 font-mono">
-                                            {JSON.stringify(c.parameters)}
-                                        </pre>
+                                        <div className="text-xs text-gray-400 mt-1">
+                                            {summarizeParameters(c.pluginType, c.parameters || {})}
+                                        </div>
                                     </div>
                                     <button
                                         onClick={() => deleteConstraint(c.id)}

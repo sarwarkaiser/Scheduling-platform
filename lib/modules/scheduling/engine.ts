@@ -79,10 +79,9 @@ export class SchedulingEngine {
     const availabilities = await prisma.availability.findMany({
       where: {
         resident: { programId: options.programId },
-        OR: [
-          { startDate: { gte: options.startDate, lte: options.endDate } },
-          { endDate: { gte: options.startDate, lte: options.endDate } },
-        ],
+        // Overlap window: start <= endDate AND end >= startDate
+        startDate: { lte: options.endDate },
+        endDate: { gte: options.startDate },
       },
     })
 
@@ -149,7 +148,13 @@ export class SchedulingEngine {
 
     for (const template of templates) {
       // Parse recurrence pattern (simplified - would need full RRULE parsing)
-      const pattern = JSON.parse(template.recurrencePattern || '{}')
+      let pattern: any = {}
+      try {
+        pattern = JSON.parse(template.recurrencePattern || '{}')
+      } catch (e) {
+        // Allow raw RRULE strings stored directly
+        pattern = template.recurrencePattern
+      }
       const instances = this.expandTemplate(template, pattern, options.startDate, options.endDate)
       shiftInstances.push(...instances)
     }
@@ -182,17 +187,37 @@ export class SchedulingEngine {
         }
 
         const freq = freqMap[pattern.type] || RRule.DAILY
+        const byweekday =
+          Array.isArray(pattern.days) && pattern.days.length > 0
+            ? pattern.days
+                .map((day: number) => {
+                  switch (day) {
+                    case 0: return RRule.SU
+                    case 1: return RRule.MO
+                    case 2: return RRule.TU
+                    case 3: return RRule.WE
+                    case 4: return RRule.TH
+                    case 5: return RRule.FR
+                    case 6: return RRule.SA
+                    default: return null
+                  }
+                })
+                .filter((day): day is RRule.Weekday => day !== null)
+            : undefined
+
+        const dtstart = template.startDate ? new Date(template.startDate) : new Date(startDate)
 
         rule = new RRule({
           freq,
           interval: pattern.interval || 1,
-          dtstart: new Date(startDate), // Start generating from window start? Or template start?
+          dtstart,
           // Ideally dtstart should be the template's *original* start date if strictly recurring, 
           // but for this MVP we can align with the window or the template's startDate logic if available.
           // For now, let's use the requested startDate to ensure we cover the window.
           // Better: Use startDate of the generation window, but be careful with alignment.
           // Simple approach: Generate from startDate to endDate
-          until: new Date(endDate)
+          until: new Date(endDate),
+          ...(byweekday ? { byweekday } : {}),
         })
       }
 
@@ -223,6 +248,8 @@ export class SchedulingEngine {
           startTime: instanceStart,
           endTime: instanceEnd,
           siteId: template.siteId,
+          serviceId: template.serviceId,
+          callPoolId: template.callPoolId, // CRITICAL: Pass through for eligibility checks
           status: 'draft' as const,
           coverageRequirements: template.coverageRequirements,
         })

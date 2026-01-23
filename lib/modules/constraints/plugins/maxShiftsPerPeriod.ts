@@ -20,8 +20,12 @@ export class MaxShiftsPerPeriodConstraint extends BaseConstraint {
       }
     }
 
-    const periodDays = (parameters.periodDays as number) || 7
-    const maxShifts = (parameters.maxShifts as number) || 5
+    const periodAlias = (parameters.period as string | undefined)?.toLowerCase()
+    const periodDays =
+      (parameters.periodDays as number | undefined) ||
+      (periodAlias === 'month' ? 30 : periodAlias === 'week' ? 7 : undefined) ||
+      7
+    const maxShifts = (parameters.maxShifts as number | undefined) || (parameters.max as number | undefined) || 5
 
     // Count shifts for this resident in the period
     const residentAssignments = scheduleState.assignments.filter(

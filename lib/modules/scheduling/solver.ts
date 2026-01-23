@@ -31,75 +31,86 @@ export class SolverModule {
       const requirements = shift.coverageRequirements || [{ role: 'Primary', count: 1, priority: 1 }]
 
       for (const requirement of requirements) {
-        let assigned = false
+        const slotsNeeded = requirement.count ?? 1
+        if (slotsNeeded <= 0) continue
+        let filledCount = 0
 
-        // Try to assign based on ranking
-        for (const candidate of ranked) {
-          // Check if resident already assigned to this shift
-          const alreadyAssigned = assignments.some(
-            a => a.shiftInstanceId === shift.id && a.residentId === candidate.residentId
-          )
-          if (alreadyAssigned) continue
+        while (filledCount < slotsNeeded) {
+          let assigned = false
 
-          // Check if resident has conflicting shift
-          const hasConflict = this.hasConflict(
-            shift,
-            residentAssignments.get(candidate.residentId) || [],
-            scheduleState
-          )
+          // Try to assign based on ranking
+          for (const candidate of ranked) {
+            // Check if resident already assigned to this shift
+            const alreadyAssigned = assignments.some(
+              a => a.shiftInstanceId === shift.id && a.residentId === candidate.residentId
+            )
+            if (alreadyAssigned) continue
 
-          let constraintValid = true
-          let penalty = 0
+            // Check if resident has conflicting shift
+            const hasConflict = this.hasConflict(
+              shift,
+              candidate.residentId,
+              residentAssignments.get(candidate.residentId) || [],
+              scheduleState
+            )
 
-          if (!hasConflict && constraintManager) {
-            // Find resident object
-            const resident = scheduleState.residents.find(r => r.id === candidate.residentId)
-            if (resident) {
-              const result = await constraintManager.validateAll({
-                resident,
-                shift,
-                assignments: assignments, // pass all assignments for global context if needed
-                periodStart: scheduleState.periodStart,
-                periodEnd: scheduleState.periodEnd
-              })
+            let constraintValid = true
+            let penalty = 0
 
-              if (!result.success) {
-                constraintValid = false
-              } else {
-                penalty = result.penalty || 0
+            if (!hasConflict && constraintManager) {
+              // Find resident object
+              const resident = scheduleState.residents.find(r => r.id === candidate.residentId)
+              if (resident) {
+                const result = await constraintManager.validateAll({
+                  resident,
+                  shift,
+                  assignments: assignments, // pass all assignments for global context if needed
+                  periodStart: scheduleState.periodStart,
+                  periodEnd: scheduleState.periodEnd
+                })
+
+                if (!result.success) {
+                  constraintValid = false
+                } else {
+                  penalty = result.penalty || 0
+                }
               }
             }
+
+            if (!hasConflict && constraintValid) {
+              const assignment: Assignment = {
+                id: `temp-${shift.id}-${candidate.residentId}-${requirement.role}-${filledCount + 1}`,
+                shiftInstanceId: shift.id,
+                residentId: candidate.residentId,
+                siteId: shift.siteId || '',
+                role: requirement.role,
+                status: 'assigned',
+                assignedAt: new Date(),
+              }
+
+              assignments.push(assignment)
+              if (!residentAssignments.has(candidate.residentId)) {
+                residentAssignments.set(candidate.residentId, [])
+              }
+              residentAssignments.get(candidate.residentId)!.push(assignment)
+              assigned = true
+              filledCount += 1
+              break
+            }
           }
 
-          if (!hasConflict && constraintValid) {
-            const assignment: Assignment = {
-              id: `temp-${shift.id}-${candidate.residentId}-${requirement.role}`,
+          if (!assigned) {
+            // Could not assign - add to unassigned
+            const eligible = eligibilityMap.get(shift.id) || []
+            unassignedShifts.push({
               shiftInstanceId: shift.id,
-              residentId: candidate.residentId,
-              siteId: shift.siteId || '',
-              role: requirement.role,
-              status: 'assigned',
-              assignedAt: new Date(),
-            }
-
-            assignments.push(assignment)
-            if (!residentAssignments.has(candidate.residentId)) {
-              residentAssignments.set(candidate.residentId, [])
-            }
-            residentAssignments.get(candidate.residentId)!.push(assignment)
-            assigned = true
+              reasons: [
+                `Could not assign ${requirement.role} (${filledCount + 1} of ${slotsNeeded}) - no eligible residents available`
+              ],
+              eligibleResidents: eligible.map(e => e.residentId),
+            })
             break
           }
-        }
-
-        if (!assigned) {
-          // Could not assign - add to unassigned
-          const eligible = eligibilityMap.get(shift.id) || []
-          unassignedShifts.push({
-            shiftInstanceId: shift.id,
-            reasons: [`Could not assign ${requirement.role} - no eligible residents available`],
-            eligibleResidents: eligible.map(e => e.residentId),
-          })
         }
       }
     }
@@ -122,11 +133,10 @@ export class SolverModule {
 
   private hasConflict(
     shift: any,
+    candidateId: string,
     existingAssignments: Assignment[],
     scheduleState: ScheduleState
   ): boolean {
-    const candidateId = existingAssignments.length > 0 ? existingAssignments[0].residentId : null
-
     // 1. Basic Overlap Check (Hard Constraint)
     for (const existing of existingAssignments) {
       const existingShift = scheduleState.shiftInstances.find(
@@ -145,11 +155,12 @@ export class SolverModule {
 
     // 2. Availability / Requests Check (Hard Constraint)
     if (candidateId && scheduleState.availabilities) {
+      const blockingTypes = new Set(['vacation', 'leave', 'unavailable'])
       // Find if resident has any unavailability overlapping with this shift
       const conflictingRequest = scheduleState.availabilities.find((a: any) => {
         if (a.residentId !== candidateId) return false
-        // Assumption: 'vacation', 'unavailable' are types that block assignment
-        // If we had a type field we would check it. For now assume all availabilities are blocking requests.
+        if (!a.approved) return false
+        if (!blockingTypes.has(a.type)) return false
 
         // Check overlap
         const start = new Date(a.startDate)
@@ -186,16 +197,28 @@ export class SolverModule {
 
           // Plugin: Max Shifts Per Period
           if (constraint.pluginType === 'max_shifts_per_period') {
-            // Simple check: count total assignments
-            const max = params.max || 4
-            if (existingAssignments.length >= max) {
+            const max = params.maxShifts ?? params.max ?? 4
+            const periodAlias = typeof params.period === 'string' ? params.period.toLowerCase() : null
+            const periodDays = params.periodDays ?? (periodAlias === 'month' ? 30 : periodAlias === 'week' ? 7 : null) ?? 7
+            const shiftDate = new Date(shift.date)
+            const periodStart = new Date(shiftDate)
+            periodStart.setDate(periodStart.getDate() - periodDays)
+
+            const shiftsInPeriod = existingAssignments.filter(a => {
+              const s = scheduleState.shiftInstances.find(si => si.id === a.shiftInstanceId)
+              if (!s) return false
+              const sDate = new Date(s.date)
+              return sDate >= periodStart && sDate <= shiftDate
+            }).length
+
+            if (shiftsInPeriod >= max) {
               return true
             }
           }
 
           // Plugin: Min Rest Between Shifts
-          if (constraint.pluginType === 'min_rest_between_shifts') {
-            const minHours = params.hours || 10
+          if (constraint.pluginType === 'min_rest_between_shifts' || constraint.pluginType === 'min_rest_between') {
+            const minHours = params.minRestHours ?? params.hours ?? 10
             const minMs = minHours * 60 * 60 * 1000
 
             for (const existing of existingAssignments) {
@@ -219,6 +242,32 @@ export class SolverModule {
             // This requires a more complex "streak" check
             // Simplified: if we have N assignments on consecutive days nearby, this breaks it.
             // Leaving as TODO or simple check later.
+          }
+
+          // Plugin: No Consecutive 24h Shifts
+          if (constraint.pluginType === 'no_consecutive_24h') {
+            const currentDurationHours = (shift.endTime.getTime() - shift.startTime.getTime()) / (1000 * 60 * 60)
+            if (currentDurationHours >= 20) {
+              for (const existing of existingAssignments) {
+                const existingShift = scheduleState.shiftInstances.find(s => s.id === existing.shiftInstanceId)
+                if (!existingShift) continue
+
+                const existingDurationHours =
+                  (existingShift.endTime.getTime() - existingShift.startTime.getTime()) / (1000 * 60 * 60)
+
+                if (existingDurationHours < 20) continue
+
+                const currentDay = new Date(shift.date)
+                const existingDay = new Date(existingShift.date)
+                currentDay.setHours(0, 0, 0, 0)
+                existingDay.setHours(0, 0, 0, 0)
+
+                const dayDiff = Math.abs(currentDay.getTime() - existingDay.getTime()) / (1000 * 60 * 60 * 24)
+                if (dayDiff === 1) {
+                  return true
+                }
+              }
+            }
           }
         }
       }

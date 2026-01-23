@@ -17,15 +17,13 @@ export class EligibilityModule {
   ): Promise<EligibilityResult[]> {
     const results: EligibilityResult[] = []
 
-    // Residents are now passed in, avoiding N+1 query
-
     for (const resident of residents) {
       const reasons: string[] = []
       let eligible = true
 
-      // Check call pool membership
+      // Check call pool membership (if shift has a call pool requirement)
       if (shiftInstance.callPoolId) {
-        const inCallPool = resident.callPools.some(
+        const inCallPool = resident.callPools?.some(
           (cp: { callPoolId: string; active: boolean }) => cp.callPoolId === shiftInstance.callPoolId && cp.active
         )
         if (!inCallPool) {
@@ -34,27 +32,47 @@ export class EligibilityModule {
         }
       }
 
-      // Check rotation block
-      const inRotation = resident.rotationBlocks.some((rb: { startDate: Date; endDate: Date; siteId: string; serviceId: string }) => {
-        const shiftDate = new Date(shiftInstance.date)
-        return (
-          shiftDate >= rb.startDate &&
-          shiftDate <= rb.endDate &&
-          (!shiftInstance.siteId || rb.siteId === shiftInstance.siteId) &&
-          (!shiftInstance.serviceId || rb.serviceId === shiftInstance.serviceId)
-        )
-      })
-      if (!inRotation) {
-        eligible = false
-        reasons.push('Not in rotation for this site/service')
+      // Check rotation block - ONLY if the shift has a specific site/service requirement
+      // For MVP, if resident has ANY active rotation block, they're considered eligible
+      // This allows broader assignment when site/service aren't strictly specified
+      if (shiftInstance.siteId || shiftInstance.serviceId) {
+        const inRotation = resident.rotationBlocks?.some((rb: { startDate: Date; endDate: Date; siteId: string; serviceId: string }) => {
+          const shiftDate = new Date(shiftInstance.date)
+          const rbStart = new Date(rb.startDate)
+          const rbEnd = new Date(rb.endDate)
+          return (
+            shiftDate >= rbStart &&
+            shiftDate <= rbEnd &&
+            (!shiftInstance.siteId || rb.siteId === shiftInstance.siteId) &&
+            (!shiftInstance.serviceId || rb.serviceId === shiftInstance.serviceId)
+          )
+        })
+        if (!inRotation) {
+          eligible = false
+          reasons.push('Not in rotation for this site/service')
+        }
+      } else {
+        // No specific site/service required - just check they have ANY rotation block covering the date
+        const hasActiveRotation = resident.rotationBlocks?.some((rb: { startDate: Date; endDate: Date }) => {
+          const shiftDate = new Date(shiftInstance.date)
+          const rbStart = new Date(rb.startDate)
+          const rbEnd = new Date(rb.endDate)
+          return shiftDate >= rbStart && shiftDate <= rbEnd
+        })
+        if (!hasActiveRotation) {
+          eligible = false
+          reasons.push('No active rotation block for this date')
+        }
       }
 
       // Check availability (vacation, leave, etc.)
-      const unavailable = resident.availabilities.some((av: { startDate: Date; endDate: Date; type: string; approved: boolean }) => {
+      const unavailable = resident.availabilities?.some((av: { startDate: Date; endDate: Date; type: string; approved: boolean }) => {
         const shiftDate = new Date(shiftInstance.date)
+        const avStart = new Date(av.startDate)
+        const avEnd = new Date(av.endDate)
         return (
-          shiftDate >= av.startDate &&
-          shiftDate <= av.endDate &&
+          shiftDate >= avStart &&
+          shiftDate <= avEnd &&
           av.approved &&
           (av.type === 'vacation' || av.type === 'leave' || av.type === 'unavailable')
         )
@@ -62,21 +80,6 @@ export class EligibilityModule {
       if (unavailable) {
         eligible = false
         reasons.push('Unavailable (vacation/leave)')
-      }
-
-      // Check post-call protection
-      const postCall = resident.availabilities.some((av: { startDate: Date; endDate: Date; type: string; approved: boolean }) => {
-        const shiftDate = new Date(shiftInstance.date)
-        return (
-          shiftDate >= av.startDate &&
-          shiftDate <= av.endDate &&
-          av.type === 'post_call_protection' &&
-          av.approved
-        )
-      })
-      if (postCall) {
-        eligible = false
-        reasons.push('Post-call protection period')
       }
 
       results.push({

@@ -96,7 +96,14 @@ async function main() {
     // 7. Create Shift Template
     const template = await prisma.shiftTemplate.upsert({
         where: { id: 'tpl-1' },
-        update: {},
+        update: {
+            coverageRequirements: {
+                deleteMany: {},
+                create: [
+                    { role: 'Primary', count: 1, priority: 1 }
+                ]
+            }
+        },
         create: {
             id: 'tpl-1',
             programId: 'prog-1',
@@ -105,10 +112,15 @@ async function main() {
             recurrencePattern: JSON.stringify({ type: 'daily', interval: 1 }),
             startTime: '18:00',
             endTime: '06:00',
-            callPoolId: 'pool-1'
+            callPoolId: 'pool-1',
+            coverageRequirements: {
+                create: [
+                    { role: 'Primary', count: 1, priority: 1 }
+                ]
+            }
         }
     })
-    console.log('Created Shift Template:', template.id)
+    console.log('Created/Updated Shift Template:', template.id)
 
     // ============================================================================
     // PSYCHIATRY SEED DATA
@@ -194,11 +206,25 @@ async function main() {
     for (const t of psychTemplates) {
         await prisma.shiftTemplate.upsert({
             where: { id: t.id },
-            update: {},
-            create: t
+            update: {
+                coverageRequirements: {
+                    deleteMany: {},
+                    create: [
+                        { role: 'Primary', count: 1, priority: 1 }
+                    ]
+                }
+            },
+            create: {
+                ...t,
+                coverageRequirements: {
+                    create: [
+                        { role: 'Primary', count: 1, priority: 1 }
+                    ]
+                }
+            }
         })
     }
-    console.log('Created Psych Shift Templates')
+    console.log('Created/Updated Psych Shift Templates')
 
     // ============================================================================
     // PROGRAM YEARS - REQUIRED FOR RESIDENTS
@@ -296,7 +322,7 @@ async function main() {
         })
 
         if (py) {
-            await prisma.resident.create({
+            const resident = await prisma.resident.create({
                 data: {
                     userId: user.id,
                     programId: 'prog-1',
@@ -304,6 +330,27 @@ async function main() {
                     active: true,
                     startDate: new Date('2024-07-01'),
                     endDate: new Date('2027-06-30'),
+                }
+            })
+
+            // Add to call pool
+            await prisma.callPoolMember.create({
+                data: {
+                    residentId: resident.id,
+                    callPoolId: 'pool-1',
+                    active: true
+                }
+            })
+
+            // Add rotation block for main site
+            await prisma.rotationBlock.create({
+                data: {
+                    residentId: resident.id,
+                    programId: 'prog-1',
+                    serviceId: 'svc-1',
+                    siteId: 'site-1',
+                    startDate: new Date('2024-01-01'),
+                    endDate: new Date('2026-12-31')
                 }
             })
         }
@@ -332,7 +379,7 @@ async function main() {
         })
 
         if (py) {
-            await prisma.resident.create({
+            const resident = await prisma.resident.create({
                 data: {
                     userId: user.id,
                     programId: 'prog-psych',
@@ -340,6 +387,27 @@ async function main() {
                     active: true,
                     startDate: new Date('2024-07-01'),
                     endDate: new Date('2028-06-30'),
+                }
+            })
+
+            // Add to psych call pool
+            await prisma.callPoolMember.create({
+                data: {
+                    residentId: resident.id,
+                    callPoolId: 'pool-psych',
+                    active: true
+                }
+            })
+
+            // Add rotation block
+            await prisma.rotationBlock.create({
+                data: {
+                    residentId: resident.id,
+                    programId: 'prog-psych',
+                    serviceId: 'svc-psych',
+                    siteId: 'site-1',
+                    startDate: new Date('2024-01-01'),
+                    endDate: new Date('2026-12-31')
                 }
             })
         }

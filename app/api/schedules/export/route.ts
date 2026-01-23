@@ -21,6 +21,14 @@ export async function GET(req: NextRequest) {
         // Validate inputs
         const { programId, startDate, endDate, format } = exportSchema.parse(searchParams);
 
+        const normalizedStart = new Date(startDate);
+        const normalizedEnd = new Date(endDate);
+        if (Number.isNaN(normalizedStart.getTime()) || Number.isNaN(normalizedEnd.getTime())) {
+            throw new Error("Invalid startDate or endDate");
+        }
+        normalizedStart.setHours(0, 0, 0, 0);
+        normalizedEnd.setHours(23, 59, 59, 999);
+
         // Fetch Program (for filename)
         const program = await prisma.program.findUniqueOrThrow({
             where: { id: programId },
@@ -32,7 +40,7 @@ export async function GET(req: NextRequest) {
             where: {
                 shiftInstance: {
                     shiftTemplate: { programId },
-                    date: { gte: startDate, lte: endDate },
+                    date: { gte: normalizedStart, lte: normalizedEnd },
                 },
             },
             include: {

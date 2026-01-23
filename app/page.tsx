@@ -17,16 +17,19 @@ export default function Home() {
             A comprehensive, fairness-first scheduling platform tailored for medical residency programs.
             Automate complex rotations, manage holidays, and handle shift swaps with ease.
           </p>
-          <div className="mt-10 flex items-center justify-center gap-x-6">
+          <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-x-6">
             <Link
               href="/admin"
-              className="rounded-md bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 transition-all transform hover:scale-105"
+              className="w-full sm:w-auto rounded-md bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 transition-all transform hover:scale-105"
             >
-              Get Started
+              Admin Console
             </Link>
-            <a href="#" className="text-sm font-semibold leading-6 text-gray-900 dark:text-white">
-              Learn more <span aria-hidden="true">→</span>
-            </a>
+            <Link
+              href="/dashboard"
+              className="w-full sm:w-auto rounded-md bg-white px-5 py-3 text-sm font-semibold text-gray-900 border border-gray-300 shadow-sm hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 transition-all transform hover:scale-105"
+            >
+              Resident Console
+            </Link>
           </div>
         </div>
       </section>

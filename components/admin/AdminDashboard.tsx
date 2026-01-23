@@ -63,6 +63,10 @@ export default function AdminPage({ programs }: { programs: any[] }) {
                     <h3 className="text-xl font-bold mb-2 dark:text-white">Fairness Report</h3>
                     <p className="text-gray-600 dark:text-gray-300">View workload distribution metrics.</p>
                 </Link>
+                <Link href="/dashboard" className="p-6 bg-blue-50 dark:bg-blue-900/20 rounded-lg shadow border border-blue-100 hover:shadow-md transition">
+                    <h3 className="text-xl font-bold mb-2 dark:text-blue-600">Resident Dashboard</h3>
+                    <p className="text-gray-600 dark:text-gray-300">Switch to the resident's view of the application.</p>
+                </Link>
             </div>
 
             <div className="bg-white shadow-md rounded-lg p-6 mb-6 dark:bg-gray-800">
@@ -112,10 +116,41 @@ export default function AdminPage({ programs }: { programs: any[] }) {
                     </button>
 
                     {result && (
-                        <div className={`mt-4 p-4 rounded ${result.success ? 'bg-green-100 dark:bg-green-900' : 'bg-red-100 dark:bg-red-900'}`}>
-                            <pre className="text-sm dark:text-white overflow-auto">
-                                {JSON.stringify(result, null, 2)}
-                            </pre>
+                        <div className={`mt-6 p-0 border rounded-lg overflow-hidden ${result.status === 'completed' ? 'border-green-200 bg-green-50/30' : 'border-red-200 bg-red-50/30'}`}>
+                            <div className={`px-4 py-2 text-sm font-semibold flex justify-between items-center ${result.status === 'completed' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                                <span>{result.status === 'completed' ? '✅ Generation Successful' : '❌ Generation Failed'}</span>
+                                {result.status === 'completed' && (
+                                    <Link
+                                        href="/admin/schedules"
+                                        className="text-xs bg-white px-2 py-1 rounded border border-green-300 hover:bg-green-50 transition"
+                                    >
+                                        View Schedule
+                                    </Link>
+                                )}
+                            </div>
+                            <div className="p-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+                                <div className="text-center">
+                                    <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Assignments</p>
+                                    <p className="text-2xl font-bold dark:text-white">{result.result?.assignments ?? 0}</p>
+                                </div>
+                                <div className="text-center">
+                                    <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Violations</p>
+                                    <p className="text-2xl font-bold dark:text-white text-orange-600">{result.result?.violations ?? 0}</p>
+                                </div>
+                                <div className="text-center">
+                                    <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Unassigned</p>
+                                    <p className="text-2xl font-bold dark:text-white text-red-600">{result.result?.unassignedShifts ?? 0}</p>
+                                </div>
+                                <div className="text-center">
+                                    <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Fairness Score</p>
+                                    <p className="text-2xl font-bold dark:text-white">{result.result?.score ?? 0}</p>
+                                </div>
+                            </div>
+                            {result.error && (
+                                <div className="px-4 py-3 bg-red-100 border-t border-red-200 text-red-700 text-sm">
+                                    {result.error}
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>

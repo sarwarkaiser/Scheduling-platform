@@ -20,7 +20,10 @@ export class MinRestBetweenShiftsConstraint extends BaseConstraint {
       }
     }
 
-    const minRestHours = (parameters.minRestHours as number) || 12
+    const minRestHours =
+      (parameters.minRestHours as number | undefined) ||
+      (parameters.hours as number | undefined) ||
+      12
 
     const residentAssignments = scheduleState.assignments
       .filter(a => a.residentId === residentId)

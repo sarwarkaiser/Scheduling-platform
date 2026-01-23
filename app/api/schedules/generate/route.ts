@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { SchedulingEngine } from '@/lib/modules/scheduling/engine'
 import { enqueueScheduleGeneration } from '@/lib/modules/jobs/scheduler'
 import { prisma } from '@/lib/prisma'
-import { validateBody, handleAPIError } from '@/lib/api-handler'
+import { APIError, validateBody, handleAPIError } from '@/lib/api-handler'
 import { generateScheduleSchema } from '@/lib/schemas'
 
 export async function POST(request: NextRequest) {
@@ -15,12 +15,60 @@ export async function POST(request: NextRequest) {
     const { programId, startDate, endDate, callPoolIds, siteIds, async = false } = options
     // Note: userId is not in the schema yet, might need to add it or extract from session
 
+    const normalizedStart = new Date(startDate)
+    const normalizedEnd = new Date(endDate)
+
+    if (Number.isNaN(normalizedStart.getTime()) || Number.isNaN(normalizedEnd.getTime())) {
+      throw new APIError('Invalid startDate or endDate', 400, 'INVALID_DATE')
+    }
+
+    normalizedStart.setHours(0, 0, 0, 0)
+    normalizedEnd.setHours(23, 59, 59, 999)
+
+    if (normalizedStart > normalizedEnd) {
+      throw new APIError('startDate must be on or before endDate', 400, 'INVALID_RANGE')
+    }
+
     if (async) {
+      const missingSiteTemplates = await prisma.shiftTemplate.findMany({
+        where: {
+          programId,
+          active: true,
+          siteId: null,
+          ...(callPoolIds && { callPoolId: { in: callPoolIds } }),
+          ...(siteIds && { siteId: { in: siteIds } }),
+          AND: [
+            {
+              OR: [
+                { startDate: null },
+                { startDate: { lte: normalizedEnd } },
+              ],
+            },
+            {
+              OR: [
+                { endDate: null },
+                { endDate: { gte: normalizedStart } },
+              ],
+            },
+          ],
+        },
+        select: { id: true, name: true },
+      })
+
+      if (missingSiteTemplates.length > 0) {
+        throw new APIError(
+          'One or more shift templates are missing a site. Please assign a site to every template before generating schedules.',
+          400,
+          'MISSING_SITE',
+          { templates: missingSiteTemplates }
+        )
+      }
+
       // Enqueue as background job
       const job = await enqueueScheduleGeneration({
         programId,
-        startDate,
-        endDate,
+        startDate: normalizedStart.toISOString(),
+        endDate: normalizedEnd.toISOString(),
         callPoolIds,
         siteIds,
         userId: 'system', // TODO: Get from auth
@@ -34,8 +82,8 @@ export async function POST(request: NextRequest) {
     } else {
       console.log('Starting synchronous generation with options:', {
         programId,
-        startDate: new Date(startDate),
-        endDate: new Date(endDate),
+        startDate: normalizedStart,
+        endDate: normalizedEnd,
         callPoolIds,
         siteIds,
       })
@@ -43,8 +91,8 @@ export async function POST(request: NextRequest) {
       const engine = new SchedulingEngine()
       const result = await engine.generateSchedule({
         programId,
-        startDate: new Date(startDate),
-        endDate: new Date(endDate),
+        startDate: normalizedStart,
+        endDate: normalizedEnd,
         callPoolIds,
         siteIds,
       })
@@ -55,6 +103,23 @@ export async function POST(request: NextRequest) {
         violationsCount: result.violations.length
       })
 
+      const missingSiteIds = (result.shiftInstances || [])
+        .filter(si => !si.siteId)
+        .map(si => si.shiftTemplateId)
+
+      if (missingSiteIds.length > 0) {
+        const templates = await prisma.shiftTemplate.findMany({
+          where: { id: { in: Array.from(new Set(missingSiteIds)) } },
+          select: { id: true, name: true },
+        })
+        throw new APIError(
+          'One or more shift templates are missing a site. Please assign a site to every template before generating schedules.',
+          400,
+          'MISSING_SITE',
+          { templates }
+        )
+      }
+
       // PERSIST RESULTS
       // 1. Clear existing assignments for this program/period
       await prisma.assignment.deleteMany({
@@ -62,8 +127,8 @@ export async function POST(request: NextRequest) {
           shiftInstance: {
             shiftTemplate: { programId },
             date: {
-              gte: new Date(startDate),
-              lte: new Date(endDate),
+              gte: normalizedStart,
+              lte: normalizedEnd,
             },
           },
         },
@@ -137,10 +202,6 @@ export async function POST(request: NextRequest) {
       })
     }
   } catch (error) {
-    console.error('Schedule generation error:', error)
-    return NextResponse.json(
-      { error: 'Failed to generate schedule', details: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 500 }
-    )
+    return handleAPIError(error)
   }
 }

@@ -26,6 +26,16 @@ const worker = new Worker(
 
         await job.updateProgress(80);
 
+        const missingSiteIds = result.shiftInstances
+            .filter(si => !si.siteId)
+            .map(si => si.shiftTemplateId);
+
+        if (missingSiteIds.length > 0) {
+            throw new Error(
+                `Schedule generation failed: missing site for templates: ${Array.from(new Set(missingSiteIds)).join(", ")}`
+            );
+        }
+
         // Save Logic (Copied/Refactored from API)
         // Ideally this persistence logic should be in the engine or a service, 
         // but for now we'll put it here to keep the engine pure calculation if possible,
@@ -50,8 +60,9 @@ const worker = new Worker(
             });
 
             // 2. Save shift instances
+            const shiftInstanceIdMap = new Map<string, string>();
             for (const si of result.shiftInstances) {
-                await tx.shiftInstance.upsert({
+                const created = await tx.shiftInstance.upsert({
                     where: {
                         shiftTemplateId_date: {
                             shiftTemplateId: si.shiftTemplateId,
@@ -72,39 +83,17 @@ const worker = new Worker(
                         status: 'published', // Or Draft? Let's default to published for now based on logic
                     }
                 });
+                shiftInstanceIdMap.set(si.id, created.id);
             }
 
             // 3. Save Assignments
             for (const assignment of result.assignments) {
-                // We need to fetch the shiftInstance ID from DB or rely on the upsert above
-                // The engine returns 'temp' IDs for instances.
-                // This is tricky without returning the DB IDs.
-                // Strategy: The upsert above ensures the instance exists.
-                // We can query it by templateId + date.
-
-                const dbInstance = await tx.shiftInstance.findUniqueOrThrow({
-                    where: {
-                        shiftTemplateId_date: {
-                            shiftTemplateId: assignment.shiftInstanceId, // Engine actually uses temp ID here?
-                            // Wait, engine uses temp ID. We need to map it back to template ID.
-                            // In engine.ts, 'id' is `temp-${template.id}-${date}`.
-                            // So we can extract templateId and date from the shiftInstance.
-                            date: new Date(result.shiftInstances.find(s => s.id === assignment.shiftInstanceId)!.date)
-                        }
-                    }
-                });
-
-                // BUT, wait. shiftInstanceId in assignment refers to the engine's internal ID.
-                // We need to re-link it.
-                // Or simpler: The engine result should probably contain the ShiftTemplateID 
-                // inside the ShiftInstance object. It does.
-
-                const shiftInstance = result.shiftInstances.find(s => s.id === assignment.shiftInstanceId);
-                if (!shiftInstance) continue;
+                const dbShiftInstanceId = shiftInstanceIdMap.get(assignment.shiftInstanceId);
+                if (!dbShiftInstanceId) continue;
 
                 await tx.assignment.create({
                     data: {
-                        shiftInstanceId: dbInstance.id,
+                        shiftInstanceId: dbShiftInstanceId,
                         residentId: assignment.residentId,
                         role: assignment.role,
                         status: 'PUBLISHED',

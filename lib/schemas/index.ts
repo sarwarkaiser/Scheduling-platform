@@ -4,7 +4,7 @@ import { z } from 'zod';
 // ============================================================================
 // SHARED
 // ============================================================================
-export const idSchema = z.string().cuid();
+export const idSchema = z.string(); // Loosened to allow non-cuid strings (e.g. seeded IDs like prog-1)
 export const paginationSchema = z.object({
     page: z.coerce.number().min(1).default(1),
     pageSize: z.coerce.number().min(1).max(100).default(20),
