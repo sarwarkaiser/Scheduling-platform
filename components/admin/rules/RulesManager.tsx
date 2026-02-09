@@ -55,6 +55,7 @@ export default function RulesManager({
 
     // Form State for Constraint
     const [name, setName] = useState("");
+    const [constraintType, setConstraintType] = useState("hard");
     const [pluginType, setPluginType] = useState(PLUGINS[0].value);
     const [maxShifts, setMaxShifts] = useState(5);
     const [periodDays, setPeriodDays] = useState(28);
@@ -62,7 +63,6 @@ export default function RulesManager({
     const [maxConsecutive, setMaxConsecutive] = useState(3);
 
     // AI Assist State
-    const [showAiAssist, setShowAiAssist] = useState(false);
     const [aiPrompt, setAiPrompt] = useState("");
     const [isProcessingAi, setIsProcessingAi] = useState(false);
 
@@ -177,7 +177,6 @@ export default function RulesManager({
             }
 
             setIsProcessingAi(false);
-            setShowAiAssist(false);
         }, 800);
     }
 
@@ -191,6 +190,7 @@ export default function RulesManager({
         formData.append("ruleSetId", selectedRuleSet);
         formData.append("name", name); // Use state
         formData.append("pluginType", pluginType); // Use state
+        formData.append("type", constraintType);
         formData.append("parameters", JSON.stringify(buildParameters())); // Use state
         await createConstraint(formData);
         setIsAddingConstraint(false);
@@ -199,7 +199,6 @@ export default function RulesManager({
     }
 
     const activeRuleSet = ruleSets.find((rs) => rs.id === selectedRuleSet);
-    const activePlugin = PLUGINS.find((p) => p.value === pluginType);
     const parameterPreview = summarizeParameters(pluginType, buildParameters());
 
     return (
@@ -301,25 +300,132 @@ export default function RulesManager({
                         </div>
 
                         {isAddingConstraint && (
-                            <div className="rounded border border-gray-200 p-4 bg-white dark:bg-gray-800 dark:border-gray-700 shadow-sm relative">
-                                <h3 className="font-medium text-sm mb-4 dark:text-white">New Constraint</h3>
-
-                                {/* AI Assistant Toggle */}
-                                <div className="absolute top-4 right-4">
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowAiAssist(!showAiAssist)}
-                                        className="text-xs flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-medium"
-                                    >
-                                        ✨ {showAiAssist ? "Use Manual Mode" : "Use AI Assistant"}
-                                    </button>
+                            <div className="rounded border border-gray-200 p-4 bg-white dark:bg-gray-800 dark:border-gray-700 shadow-sm space-y-4">
+                                <div>
+                                    <h3 className="font-medium text-sm dark:text-white">New Constraint</h3>
+                                    <p className="text-xs text-gray-500 mt-1">
+                                        1) Name it, 2) pick a rule, 3) tweak the settings. We’ll preview it for you.
+                                    </p>
                                 </div>
 
-                                {showAiAssist ? (
-                                    <div className="space-y-4 py-2">
-                                        <div>
-                                            <label className="block text-sm font-medium dark:text-gray-300">Describe the rule in plain English</label>
-                                            <div className="mt-1 flex gap-2">
+                                <form action={handleCreateConstraint} className="space-y-4">
+                                    <input type="hidden" name="type" value={constraintType} />
+                                    <div>
+                                        <label className="block text-xs font-medium dark:text-gray-300">Name</label>
+                                        <input
+                                            name="name"
+                                            value={name}
+                                            onChange={(e) => setName(e.target.value)}
+                                            required
+                                            className="w-full rounded border p-2 text-sm dark:bg-gray-700 dark:border-gray-600"
+                                            placeholder="e.g. Max 4 Calls"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-medium dark:text-gray-300">Type</label>
+                                        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                                            {CONSTRAINT_TYPES.map((t) => (
+                                                <button
+                                                    key={t.value}
+                                                    type="button"
+                                                    onClick={() => setConstraintType(t.value)}
+                                                    className={`rounded border px-3 py-2 text-left text-xs font-medium transition ${constraintType === t.value
+                                                        ? "border-indigo-500 bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-200"
+                                                        : "border-gray-200 text-gray-600 hover:border-indigo-200 dark:border-gray-700 dark:text-gray-300"
+                                                        }`}
+                                                >
+                                                    {t.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-medium dark:text-gray-300">Rule to Apply</label>
+                                        <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                                            {PLUGINS.map((plugin) => (
+                                                <button
+                                                    key={plugin.value}
+                                                    type="button"
+                                                    onClick={() => handlePluginChange(plugin.value)}
+                                                    className={`rounded border px-3 py-3 text-left text-xs transition ${pluginType === plugin.value
+                                                        ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-900/30"
+                                                        : "border-gray-200 hover:border-indigo-200 dark:border-gray-700"
+                                                        }`}
+                                                >
+                                                    <div className="font-semibold text-gray-900 dark:text-white">{plugin.label}</div>
+                                                    <div className="mt-1 text-[11px] text-gray-500">{plugin.help}</div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-medium dark:text-gray-300">Settings</label>
+                                        <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                            {pluginType === "max_shifts_per_period" && (
+                                                <>
+                                                    <div>
+                                                        <label className="block text-[11px] font-medium text-gray-500">Max shifts</label>
+                                                        <input
+                                                            type="number"
+                                                            min={1}
+                                                            value={maxShifts}
+                                                            onChange={(e) => setMaxShifts(Number(e.target.value))}
+                                                            className="w-full rounded border p-2 text-sm dark:bg-gray-700 dark:border-gray-600"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-[11px] font-medium text-gray-500">Period (days)</label>
+                                                        <input
+                                                            type="number"
+                                                            min={1}
+                                                            value={periodDays}
+                                                            onChange={(e) => setPeriodDays(Number(e.target.value))}
+                                                            className="w-full rounded border p-2 text-sm dark:bg-gray-700 dark:border-gray-600"
+                                                        />
+                                                    </div>
+                                                </>
+                                            )}
+                                            {pluginType === "min_rest_between" && (
+                                                <div>
+                                                    <label className="block text-[11px] font-medium text-gray-500">Minimum rest (hours)</label>
+                                                    <input
+                                                        type="number"
+                                                        min={1}
+                                                        value={minRestHours}
+                                                        onChange={(e) => setMinRestHours(Number(e.target.value))}
+                                                        className="w-full rounded border p-2 text-sm dark:bg-gray-700 dark:border-gray-600"
+                                                    />
+                                                </div>
+                                            )}
+                                            {pluginType === "max_consecutive_shifts" && (
+                                                <div>
+                                                    <label className="block text-[11px] font-medium text-gray-500">Max consecutive days</label>
+                                                    <input
+                                                        type="number"
+                                                        min={1}
+                                                        value={maxConsecutive}
+                                                        onChange={(e) => setMaxConsecutive(Number(e.target.value))}
+                                                        className="w-full rounded border p-2 text-sm dark:bg-gray-700 dark:border-gray-600"
+                                                    />
+                                                </div>
+                                            )}
+                                            {pluginType === "no_consecutive_24h" && (
+                                                <div className="text-xs text-gray-500">
+                                                    This rule has no extra settings.
+                                                </div>
+                                            )}
+                                        </div>
+                                        <p className="text-xs text-gray-500 mt-2">Preview: {parameterPreview}</p>
+                                    </div>
+                                    <details className="rounded border border-dashed border-gray-300 p-3 text-xs text-gray-500 dark:border-gray-600">
+                                        <summary className="cursor-pointer font-medium text-gray-700 dark:text-gray-200">
+                                            Advanced: use the AI helper (optional)
+                                        </summary>
+                                        <div className="mt-3 space-y-2">
+                                            <label className="block text-sm font-medium dark:text-gray-300">
+                                                Describe the rule in plain English
+                                            </label>
+                                            <div className="flex flex-col gap-2 sm:flex-row">
                                                 <input
                                                     value={aiPrompt}
                                                     onChange={(e) => setAiPrompt(e.target.value)}
@@ -328,6 +434,7 @@ export default function RulesManager({
                                                     onKeyDown={(e) => e.key === 'Enter' && handleAiProcess()}
                                                 />
                                                 <button
+                                                    type="button"
                                                     onClick={handleAiProcess}
                                                     disabled={isProcessingAi}
                                                     className="rounded bg-purple-600 px-4 py-2 text-sm font-semibold text-white hover:bg-purple-500 disabled:opacity-50"
@@ -335,111 +442,16 @@ export default function RulesManager({
                                                     {isProcessingAi ? "Thinking..." : "Generate"}
                                                 </button>
                                             </div>
-                                            <p className="text-xs text-gray-500 mt-2">
+                                            <p className="text-xs text-gray-500">
                                                 Try: "Max 3 consecutive shifts", "10 hours rest", "Max 5 shifts per month"
                                             </p>
                                         </div>
+                                    </details>
+                                    <div className="flex justify-end gap-2">
+                                        <button type="button" onClick={() => setIsAddingConstraint(false)} className="text-sm px-3 py-1 bg-gray-100 rounded hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200">Cancel</button>
+                                        <button type="submit" className="text-sm px-3 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-500">Add Constraint</button>
                                     </div>
-                                ) : (
-                                    <form action={handleCreateConstraint} className="space-y-4">
-                                        <div>
-                                            <label className="block text-xs font-medium dark:text-gray-300">Name</label>
-                                            <input
-                                                name="name"
-                                                value={name}
-                                                onChange={(e) => setName(e.target.value)}
-                                                required
-                                                className="w-full rounded border p-2 text-sm dark:bg-gray-700 dark:border-gray-600"
-                                                placeholder="e.g. Max 4 Calls"
-                                            />
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div>
-                                                <label className="block text-xs font-medium dark:text-gray-300">Type</label>
-                                                <select name="type" className="w-full rounded border p-2 text-sm dark:bg-gray-700 dark:border-gray-600">
-                                                    {CONSTRAINT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                                                </select>
-                                            </div>
-                                            <div>
-                                                <label className="block text-xs font-medium dark:text-gray-300">Logic Plugin</label>
-                                                <select
-                                                    name="pluginType"
-                                                    value={pluginType}
-                                                    onChange={(e) => handlePluginChange(e.target.value)}
-                                                    className="w-full rounded border p-2 text-sm dark:bg-gray-700 dark:border-gray-600"
-                                                >
-                                                    {PLUGINS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-                                                </select>
-                                                {activePlugin?.help && (
-                                                    <p className="mt-1 text-[11px] text-gray-500">{activePlugin.help}</p>
-                                                )}
-                                            </div>
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-medium dark:text-gray-300">Settings</label>
-                                            <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                                                {pluginType === "max_shifts_per_period" && (
-                                                    <>
-                                                        <div>
-                                                            <label className="block text-[11px] font-medium text-gray-500">Max shifts</label>
-                                                            <input
-                                                                type="number"
-                                                                min={1}
-                                                                value={maxShifts}
-                                                                onChange={(e) => setMaxShifts(Number(e.target.value))}
-                                                                className="w-full rounded border p-2 text-sm dark:bg-gray-700 dark:border-gray-600"
-                                                            />
-                                                        </div>
-                                                        <div>
-                                                            <label className="block text-[11px] font-medium text-gray-500">Period (days)</label>
-                                                            <input
-                                                                type="number"
-                                                                min={1}
-                                                                value={periodDays}
-                                                                onChange={(e) => setPeriodDays(Number(e.target.value))}
-                                                                className="w-full rounded border p-2 text-sm dark:bg-gray-700 dark:border-gray-600"
-                                                            />
-                                                        </div>
-                                                    </>
-                                                )}
-                                                {pluginType === "min_rest_between" && (
-                                                    <div>
-                                                        <label className="block text-[11px] font-medium text-gray-500">Minimum rest (hours)</label>
-                                                        <input
-                                                            type="number"
-                                                            min={1}
-                                                            value={minRestHours}
-                                                            onChange={(e) => setMinRestHours(Number(e.target.value))}
-                                                            className="w-full rounded border p-2 text-sm dark:bg-gray-700 dark:border-gray-600"
-                                                        />
-                                                    </div>
-                                                )}
-                                                {pluginType === "max_consecutive_shifts" && (
-                                                    <div>
-                                                        <label className="block text-[11px] font-medium text-gray-500">Max consecutive days</label>
-                                                        <input
-                                                            type="number"
-                                                            min={1}
-                                                            value={maxConsecutive}
-                                                            onChange={(e) => setMaxConsecutive(Number(e.target.value))}
-                                                            className="w-full rounded border p-2 text-sm dark:bg-gray-700 dark:border-gray-600"
-                                                        />
-                                                    </div>
-                                                )}
-                                                {pluginType === "no_consecutive_24h" && (
-                                                    <div className="text-xs text-gray-500">
-                                                        This rule has no extra settings.
-                                                    </div>
-                                                )}
-                                            </div>
-                                            <p className="text-xs text-gray-500 mt-2">Preview: {parameterPreview}</p>
-                                        </div>
-                                        <div className="flex justify-end gap-2">
-                                            <button type="button" onClick={() => setIsAddingConstraint(false)} className="text-sm px-3 py-1 bg-gray-100 rounded hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200">Cancel</button>
-                                            <button type="submit" className="text-sm px-3 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-500">Add Constraint</button>
-                                        </div>
-                                    </form>
-                                )}
+                                </form>
                             </div>
                         )}
 
