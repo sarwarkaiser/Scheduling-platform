@@ -113,6 +113,7 @@ async function main() {
     const template = await prisma.shiftTemplate.upsert({
         where: { id: 'tpl-1' },
         update: {
+            siteId: 'site-1',
             coverageRequirements: {
                 deleteMany: {},
                 create: [
@@ -129,6 +130,7 @@ async function main() {
             startTime: '18:00',
             endTime: '06:00',
             callPoolId: 'pool-1',
+            siteId: 'site-1',
             coverageRequirements: {
                 create: [
                     { role: 'Primary', count: 1, priority: 1 }
@@ -205,7 +207,8 @@ async function main() {
             recurrencePattern: JSON.stringify({ type: 'daily', interval: 1 }),
             startTime: '08:00',
             endTime: '20:00',
-            callPoolId: 'pool-psych'
+            callPoolId: 'pool-psych',
+            siteId: 'site-1',
         },
         {
             id: 'tpl-psych-2',
@@ -215,7 +218,7 @@ async function main() {
             recurrencePattern: JSON.stringify({ type: 'daily', interval: 1 }),
             startTime: '09:00',
             endTime: '17:00',
-            // No call pool for CL, it's a rotation shift, but simplified for now
+            siteId: 'site-1',
         }
     ]
 
@@ -223,6 +226,7 @@ async function main() {
         await prisma.shiftTemplate.upsert({
             where: { id: t.id },
             update: {
+                siteId: 'site-1',
                 coverageRequirements: {
                     deleteMany: {},
                     create: [

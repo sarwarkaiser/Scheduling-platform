@@ -103,21 +103,27 @@ export async function POST(request: NextRequest) {
         violationsCount: result.violations.length
       })
 
-      const missingSiteIds = (result.shiftInstances || [])
-        .filter(si => !si.siteId)
-        .map(si => si.shiftTemplateId)
-
-      if (missingSiteIds.length > 0) {
-        const templates = await prisma.shiftTemplate.findMany({
-          where: { id: { in: Array.from(new Set(missingSiteIds)) } },
-          select: { id: true, name: true },
+      // If any shift instances have null siteId, fall back to the program's first site
+      const missingSiteInstances = (result.shiftInstances || []).filter(si => !si.siteId)
+      if (missingSiteInstances.length > 0) {
+        const fallbackSite = await prisma.site.findFirst({
+          where: { organization: { programs: { some: { id: programId } } } },
+          select: { id: true },
         })
-        throw new APIError(
-          'One or more shift templates are missing a site. Please assign a site to every template before generating schedules.',
-          400,
-          'MISSING_SITE',
-          { templates }
-        )
+        if (!fallbackSite) {
+          throw new APIError(
+            'No site configured for this program. Please create a site first.',
+            400,
+            'MISSING_SITE'
+          )
+        }
+        for (const si of missingSiteInstances) {
+          si.siteId = fallbackSite.id
+        }
+        // Also apply fallback to assignments missing siteId
+        for (const a of result.assignments) {
+          if (!a.siteId) a.siteId = fallbackSite.id
+        }
       }
 
       // PERSIST RESULTS
