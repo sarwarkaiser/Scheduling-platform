@@ -1,24 +1,24 @@
-import { getRuleSets } from "@/app/actions/rules";
+import { getRulesForProgram } from "@/app/actions/rules";
 import { getPrograms } from "@/app/actions/programs";
-import { prisma } from "@/lib/prisma";
 import RulesManager from "@/components/admin/rules/RulesManager";
 
 export default async function RulesPage() {
-    const ruleSets = await getRuleSets();
     const programs = await getPrograms();
-    const programYears = await prisma.programYear.findMany({ orderBy: { name: 'asc' } });
+    const firstProgramId = programs[0]?.id || "";
+    const initialRules = firstProgramId ? await getRulesForProgram(firstProgramId) : [];
 
     return (
         <div className="space-y-6">
-            <h1 className="text-2xl font-bold dark:text-white">Rules & Constraints</h1>
-            <p className="text-gray-500 dark:text-gray-400">
-                Define the limits and patterns for schedule generation.
-            </p>
-
+            <div>
+                <h1 className="text-2xl font-bold dark:text-white">Rules</h1>
+                <p className="text-gray-500 dark:text-gray-400 mt-1">
+                    Set scheduling limits for each program. These are applied automatically during schedule generation.
+                </p>
+            </div>
             <RulesManager
-                ruleSets={ruleSets}
                 programs={programs}
-                programYears={programYears}
+                initialRules={initialRules as any}
+                initialProgramId={firstProgramId}
             />
         </div>
     );
