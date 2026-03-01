@@ -10,6 +10,7 @@ export default function SignUpPage() {
     const [name, setName] = useState("")
     const [email, setEmail] = useState("")
     const [password, setPassword] = useState("")
+    const [adminSecret, setAdminSecret] = useState("")
     const [error, setError] = useState("")
     const [isLoading, setIsLoading] = useState(false)
 
@@ -22,7 +23,7 @@ export default function SignUpPage() {
             const res = await fetch("/api/auth/register", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name, email, password }),
+                body: JSON.stringify({ name, email, password, ...(adminSecret ? { adminSecret } : {}) }),
             })
 
             const data = await res.json()
@@ -111,6 +112,23 @@ export default function SignUpPage() {
                                     minLength={6}
                                     value={password}
                                     onChange={(e) => setPassword(e.target.value)}
+                                    className="block w-full appearance-none rounded-md border border-gray-300 px-3 py-2 placeholder-gray-400 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm"
+                                />
+                            </div>
+                        </div>
+
+                        <div>
+                            <label htmlFor="adminSecret" className="block text-sm font-medium text-gray-700">
+                                Admin Secret <span className="text-gray-400 font-normal">(leave blank for resident account)</span>
+                            </label>
+                            <div className="mt-1">
+                                <input
+                                    id="adminSecret"
+                                    name="adminSecret"
+                                    type="password"
+                                    placeholder="Optional — required to create an admin account"
+                                    value={adminSecret}
+                                    onChange={(e) => setAdminSecret(e.target.value)}
                                     className="block w-full appearance-none rounded-md border border-gray-300 px-3 py-2 placeholder-gray-400 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm"
                                 />
                             </div>

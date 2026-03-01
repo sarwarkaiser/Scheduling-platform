@@ -4,7 +4,7 @@ import { NextResponse } from "next/server"
 import "@/lib/env" // Trigger validation on startup
 
 export default withAuth(
-    function middleware(req) {
+    function proxy(req) {
         const token = req.nextauth.token
         const isAuth = !!token
         const isAuthPage = req.nextUrl.pathname.startsWith("/login")

@@ -1,9 +1,27 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useTransition } from 'react';
 import { signOut } from 'next-auth/react';
+import Link from 'next/link';
+import { postOpenSwap } from '@/app/actions/swaps';
 
 export default function ResidentDashboard({ resident, assignments }: { resident: any; assignments: any[] }) {
+    const [isPending, startTransition] = useTransition();
+    const [swapError, setSwapError] = useState<Record<string, string>>({});
+    const [swapSuccess, setSwapSuccess] = useState<Record<string, boolean>>({});
+
+    function handleRequestSwap(assignmentId: string) {
+        setSwapError(prev => ({ ...prev, [assignmentId]: "" }));
+        startTransition(async () => {
+            const result = await postOpenSwap(assignmentId, "Requesting swap from dashboard");
+            if (result.success) {
+                setSwapSuccess(prev => ({ ...prev, [assignmentId]: true }));
+            } else {
+                setSwapError(prev => ({ ...prev, [assignmentId]: result.error || "Failed" }));
+            }
+        });
+    }
+
     return (
         <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
             {/* Header */}
@@ -51,8 +69,23 @@ export default function ResidentDashboard({ resident, assignments }: { resident:
                                                     <p className="font-bold text-gray-900 dark:text-white">{assignment.shiftInstance.shiftTemplate.name}</p>
                                                     <p className="text-sm text-gray-500">{assignment.shiftInstance.startTime} - {assignment.shiftInstance.endTime} • {assignment.site.name}</p>
                                                 </div>
-                                                <div>
-                                                    <button className="text-blue-600 hover:text-blue-800 text-sm font-semibold">Request Swap</button>
+                                                <div className="text-right">
+                                                    {swapSuccess[assignment.id] ? (
+                                                        <span className="text-green-600 text-xs font-semibold">Posted to swap board</span>
+                                                    ) : (
+                                                        <>
+                                                            <button
+                                                                onClick={() => handleRequestSwap(assignment.id)}
+                                                                disabled={isPending}
+                                                                className="text-blue-600 hover:text-blue-800 text-sm font-semibold disabled:opacity-50"
+                                                            >
+                                                                {isPending ? "…" : "Request Swap"}
+                                                            </button>
+                                                            {swapError[assignment.id] && (
+                                                                <p className="text-xs text-red-500 mt-1">{swapError[assignment.id]}</p>
+                                                            )}
+                                                        </>
+                                                    )}
                                                 </div>
                                             </div>
                                         ))}
@@ -90,9 +123,12 @@ export default function ResidentDashboard({ resident, assignments }: { resident:
                         <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
                             <h3 className="text-lg font-bold mb-4 dark:text-white">Quick Actions</h3>
                             <div className="space-y-3">
-                                <button className="w-full py-2 px-4 bg-white border border-gray-300 rounded-lg text-sm font-semibold hover:bg-gray-50 transition border-gray-100">Set Availability</button>
-                                <button className="w-full py-2 px-4 bg-white border border-gray-300 rounded-lg text-sm font-semibold hover:bg-gray-50 transition border-gray-100">View Swap Board</button>
-                                <button className="w-full py-2 px-4 bg-white border border-gray-300 rounded-lg text-sm font-semibold hover:bg-gray-50 transition border-gray-100">Contact Chief Resident</button>
+                                <Link href="/dashboard/availability" className="block w-full py-2 px-4 bg-white border border-gray-300 rounded-lg text-sm font-semibold hover:bg-gray-50 transition text-center dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:bg-gray-600">
+                                    Set Availability
+                                </Link>
+                                <Link href="/dashboard/swaps" className="block w-full py-2 px-4 bg-white border border-gray-300 rounded-lg text-sm font-semibold hover:bg-gray-50 transition text-center dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:bg-gray-600">
+                                    View Swap Board
+                                </Link>
                             </div>
                         </div>
                     </div>

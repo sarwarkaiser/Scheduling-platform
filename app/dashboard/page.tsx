@@ -1,16 +1,17 @@
 import { prisma } from "@/lib/prisma";
 import ResidentDashboard from "@/components/resident/ResidentDashboard";
 import { redirect } from "next/navigation";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 
 export default async function DashboardPage() {
-    // For MVP, we'll fetch the first resident if no user is signed in, 
-    // or simulate finding by email from the seed.
-    // In a real app, this would use the session: 
-    // const session = await getServerSession(authOptions);
-    // const resident = await prisma.resident.findFirst({ where: { user: { email: session.user.email } } ... });
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.email) {
+        redirect("/login");
+    }
 
     const resident = await prisma.resident.findFirst({
-        where: { active: true },
+        where: { user: { email: session.user.email }, active: true },
         include: {
             user: true,
             program: true,

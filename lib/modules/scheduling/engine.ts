@@ -2,7 +2,7 @@
 
 import type { ScheduleState, SolverResult, EligibilityResult, Assignment } from '@/lib/types/scheduling'
 import { prisma } from '@/lib/prisma'
-import { RRule } from 'rrule'
+import { RRule, type Weekday } from 'rrule'
 import { EligibilityModule } from './eligibility'
 import { RankingModule } from './ranking'
 import { SolverModule } from './solver'
@@ -202,7 +202,7 @@ export class SchedulingEngine {
                     default: return null
                   }
                 })
-                .filter((day): day is RRule.Weekday => day !== null)
+                .filter((day: Weekday | null): day is Weekday => day !== null)
             : undefined
 
         const dtstart = template.startDate ? new Date(template.startDate) : new Date(startDate)

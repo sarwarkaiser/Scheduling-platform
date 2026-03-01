@@ -1,6 +1,7 @@
 import { PrismaClient } from '../lib/generated/client/client'
 import { Pool } from 'pg'
 import { PrismaPg } from '@prisma/adapter-pg'
+import { hashSync } from 'bcryptjs'
 import * as dotenv from 'dotenv'
 
 dotenv.config()
@@ -12,6 +13,21 @@ const prisma = new PrismaClient({ adapter })
 
 async function main() {
     console.log('Seeding database...')
+
+    // ============================================================================
+    // ADMIN USER (login: admin@example.com / password: admin123)
+    // ============================================================================
+    await prisma.user.upsert({
+        where: { email: 'admin@example.com' },
+        update: {},
+        create: {
+            email: 'admin@example.com',
+            name: 'Admin User',
+            password: hashSync('admin123', 12),
+            role: 'ADMIN',
+        },
+    })
+    console.log('Created Admin User: admin@example.com / admin123')
 
     // 1. Create Organization
     const org = await prisma.organization.upsert({
@@ -300,11 +316,11 @@ async function main() {
     ]
 
     for (const r of imResidents) {
-        // Create User
+        // Create User (password: resident123)
         const user = await prisma.user.upsert({
             where: { email: r.email },
             update: {},
-            create: { email: r.email, name: r.name }
+            create: { email: r.email, name: r.name, password: hashSync('resident123', 12), role: 'RESIDENT' }
         })
 
         // Cleanup existing residents for this user/program to avoid dups or constraint errors
@@ -367,7 +383,7 @@ async function main() {
         const user = await prisma.user.upsert({
             where: { email: r.email },
             update: {},
-            create: { email: r.email, name: r.name }
+            create: { email: r.email, name: r.name, password: hashSync('resident123', 12), role: 'RESIDENT' }
         })
 
         await prisma.resident.deleteMany({
