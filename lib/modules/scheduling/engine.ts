@@ -40,10 +40,13 @@ export class SchedulingEngine {
   }
 
   async generateSchedule(options: ScheduleGenerationOptions): Promise<SolverResult> {
+    console.log('📋 Step 1: Building demand (expanding templates)...')
     // Step 1: Build demand (expand templates to shift instances)
     const shiftInstances = await this.buildDemand(options)
+    console.log(`✅ Created ${shiftInstances.length} shift instances`)
 
     // Step 1.5: Pre-fetch Residents (Fix N+1)
+    console.log('📋 Step 1.5: Fetching residents...')
     const residents = await prisma.resident.findMany({
       where: {
         programId: options.programId,
@@ -59,11 +62,15 @@ export class SchedulingEngine {
         availabilities: true,
       },
     })
+    console.log(`✅ Found ${residents.length} active residents`)
 
     // Step 2: Build eligibility sets
+    console.log('📋 Step 2: Building eligibility...')
     const eligibilityMap = await this.buildEligibility(shiftInstances, residents, options)
+    console.log(`✅ Built eligibility for ${eligibilityMap.size} shifts`)
 
     // Step 2.5: Fetch Rules and Requests (Already done, but residents now available)
+    console.log('📋 Step 2.5: Fetching rules...')
     const ruleSets = await prisma.ruleSet.findMany({
       where: {
         programId: options.programId,
@@ -75,6 +82,7 @@ export class SchedulingEngine {
         },
       },
     })
+    console.log(`✅ Found ${ruleSets.length} rule sets`)
 
     const availabilities = await prisma.availability.findMany({
       where: {
@@ -84,11 +92,15 @@ export class SchedulingEngine {
         endDate: { gte: options.startDate },
       },
     })
+    console.log(`✅ Found ${availabilities.length} availabilities`)
 
     // Step 3: Construct candidate ranking
+    console.log('📋 Step 3: Building rankings...')
     const rankings = await this.buildRankings(shiftInstances, eligibilityMap, options)
+    console.log(`✅ Built rankings for ${rankings.size} shifts`)
 
     // Step 4: Solve
+    console.log('📋 Step 4: Running solver...')
     const scheduleState: ScheduleState = {
       assignments: [],
       shiftInstances,
@@ -100,12 +112,17 @@ export class SchedulingEngine {
     }
 
     const result = await this.solver.solve(scheduleState, rankings, eligibilityMap, this.constraints)
+    console.log(`✅ Solver completed: ${result.assignments.length} assignments`)
 
     // Step 5: Explain
+    console.log('📋 Step 5: Generating explanations...')
     const explanations = await this.explanation.explain(result.assignments, scheduleState)
+    console.log('✅ Explanations generated')
 
     // Step 6: Validate
+    console.log('📋 Step 6: Validating...')
     const violations = await this.validation.validate(result.assignments, scheduleState)
+    console.log(`✅ Validation complete: ${violations.length} violations`)
 
     return {
       ...result,

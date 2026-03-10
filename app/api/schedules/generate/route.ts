@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
         message: 'Schedule generation queued',
       })
     } else {
-      console.log('Starting synchronous generation with options:', {
+      console.log('🚀 Starting synchronous generation with options:', {
         programId,
         startDate: normalizedStart,
         endDate: normalizedEnd,
@@ -89,6 +89,8 @@ export async function POST(request: NextRequest) {
       })
 
       const engine = new SchedulingEngine()
+      
+      console.log('⚙️ Step 1: Generating schedule...')
       const result = await engine.generateSchedule({
         programId,
         startDate: normalizedStart,
@@ -96,6 +98,7 @@ export async function POST(request: NextRequest) {
         callPoolIds,
         siteIds,
       })
+      console.log('✅ Step 1 complete')
 
       console.log('Engine Result:', {
         assignmentsCount: result.assignments.length,

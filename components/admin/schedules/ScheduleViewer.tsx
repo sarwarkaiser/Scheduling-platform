@@ -3,6 +3,9 @@
 import { useState, useTransition } from "react";
 import { getSchedule } from "@/app/actions/schedule";
 import MonthlyCalendar from "./MonthlyCalendar";
+import ManualShiftManager from "./ManualShiftManager";
+import { SparklesIcon, CalendarDaysIcon, ClockIcon } from "@heroicons/react/24/outline";
+import Link from "next/link";
 
 export default function ScheduleViewer({
     initialEvents,
@@ -13,8 +16,44 @@ export default function ScheduleViewer({
 }) {
     const [selectedProgram, setSelectedProgram] = useState(programs[0]?.id || "");
     const [events, setEvents] = useState(initialEvents);
-    const [view, setView] = useState<"calendar" | "list">("calendar");
+    const [view, setView] = useState<"calendar" | "list" | "manual">("calendar");
     const [isPending, startTransition] = useTransition();
+    const [isGenerating, setIsGenerating] = useState(false);
+    const [generateResult, setGenerateResult] = useState<any>(null);
+
+    async function handleGenerate() {
+        setIsGenerating(true);
+        setGenerateResult(null);
+        try {
+            const today = new Date();
+            const endDate = new Date(today);
+            endDate.setDate(endDate.getDate() + 30);
+
+            const res = await fetch("/api/schedules/generate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    programId: selectedProgram,
+                    startDate: today.toISOString(),
+                    endDate: endDate.toISOString(),
+                }),
+            });
+            const data = await res.json();
+            setGenerateResult(data);
+
+            // Refresh the schedule
+            if (data.status === "completed") {
+                const start = new Date(today.getFullYear(), today.getMonth(), 1).toISOString();
+                const end = new Date(today.getFullYear(), today.getMonth() + 1, 0, 23, 59, 59).toISOString();
+                const refreshed = await getSchedule(selectedProgram, start, end);
+                setEvents(refreshed as any);
+            }
+        } catch (e: any) {
+            setGenerateResult({ status: "error", error: e.message });
+        } finally {
+            setIsGenerating(false);
+        }
+    }
 
     async function handleProgramChange(programId: string) {
         setSelectedProgram(programId);
@@ -52,17 +91,35 @@ export default function ScheduleViewer({
                     {isPending && <span className="text-xs text-gray-400">Loading…</span>}
                 </div>
                 <div className="flex items-center gap-2">
+                    {/* Generate Schedule Button */}
+                    <button
+                        onClick={handleGenerate}
+                        disabled={isGenerating}
+                        className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 transition"
+                        title="Generate schedule for next 30 days"
+                    >
+                        <SparklesIcon className="h-4 w-4" />
+                        {isGenerating ? "Generating…" : "Generate Schedule"}
+                    </button>
                     {/* View toggle */}
                     <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden text-sm">
                         <button
                             onClick={() => setView("calendar")}
-                            className={`px-3 py-1.5 font-medium transition ${view === "calendar" ? "bg-indigo-600 text-white" : "text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"}`}
+                            className={`px-3 py-1.5 font-medium transition flex items-center gap-1 ${view === "calendar" ? "bg-indigo-600 text-white" : "text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"}`}
                         >
+                            <CalendarDaysIcon className="h-4 w-4" />
                             Calendar
                         </button>
                         <button
+                            onClick={() => setView("manual")}
+                            className={`px-3 py-1.5 font-medium transition flex items-center gap-1 ${view === "manual" ? "bg-indigo-600 text-white" : "text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"}`}
+                        >
+                            <ClockIcon className="h-4 w-4" />
+                            Manual Shifts
+                        </button>
+                        <button
                             onClick={() => setView("list")}
-                            className={`px-3 py-1.5 font-medium transition ${view === "list" ? "bg-indigo-600 text-white" : "text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"}`}
+                            className={`px-3 py-1.5 font-medium transition flex items-center gap-1 ${view === "list" ? "bg-indigo-600 text-white" : "text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"}`}
                         >
                             List
                         </button>
@@ -76,9 +133,69 @@ export default function ScheduleViewer({
                 </div>
             </div>
 
+            {/* Generation Result */}
+            {generateResult && (
+                <div
+                    className={`rounded-lg overflow-hidden border ${
+                        generateResult.status === "completed"
+                            ? "border-emerald-200 dark:border-emerald-800"
+                            : "border-red-200 dark:border-red-800"
+                    }`}
+                >
+                    <div
+                        className={`px-4 py-2.5 flex items-center justify-between text-sm font-semibold ${
+                            generateResult.status === "completed"
+                                ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-800 dark:text-emerald-300"
+                                : "bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-300"
+                        }`}
+                    >
+                        <span>
+                            {generateResult.status === "completed"
+                                ? "Schedule generated successfully"
+                                : "Generation failed"}
+                        </span>
+                        {generateResult.status === "completed" && (
+                            <Link
+                                href="/admin"
+                                className="text-xs bg-white dark:bg-slate-800 px-2.5 py-1 rounded-md border border-emerald-300 dark:border-emerald-700 hover:bg-emerald-50 transition flex items-center gap-1"
+                            >
+                                Generate More <SparklesIcon className="h-3 w-3" />
+                            </Link>
+                        )}
+                    </div>
+                    {generateResult.status === "completed" && (
+                        <div className="px-4 py-4 grid grid-cols-4 gap-3 bg-white dark:bg-slate-800/50">
+                            {[
+                                { label: "Assignments", value: generateResult.result?.assignments ?? 0, color: "text-slate-900 dark:text-white" },
+                                { label: "Violations", value: generateResult.result?.violations ?? 0, color: "text-amber-600" },
+                                { label: "Unassigned", value: generateResult.result?.unassignedShifts ?? 0, color: "text-red-600" },
+                                { label: "Score", value: generateResult.result?.score ?? 0, color: "text-slate-900 dark:text-white" },
+                            ].map((m) => (
+                                <div key={m.label} className="text-center">
+                                    <p className={`text-xl font-bold ${m.color}`}>{m.value}</p>
+                                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{m.label}</p>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    {generateResult.error && (
+                        <div className="px-4 py-3 text-sm text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/10 border-t border-red-200 dark:border-red-800">
+                            {typeof generateResult.error === "string"
+                                ? generateResult.error
+                                : generateResult.message || "An unexpected error occurred."}
+                        </div>
+                    )}
+                </div>
+            )}
+
             {/* Calendar view */}
             {view === "calendar" && (
                 <MonthlyCalendar programId={selectedProgram} initialEvents={events} />
+            )}
+
+            {/* Manual Shift Management */}
+            {view === "manual" && (
+                <ManualShiftManager programId={selectedProgram} />
             )}
 
             {/* List view */}

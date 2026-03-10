@@ -28,6 +28,7 @@ export class SolverModule {
 
     for (const shift of sortedShifts) {
       const ranked = rankings.get(shift.id) || []
+      const eligible = eligibilityMap.get(shift.id) || []
       const requirements = shift.coverageRequirements || [{ role: 'Primary', count: 1, priority: 1 }]
 
       for (const requirement of requirements) {
@@ -56,26 +57,6 @@ export class SolverModule {
 
             let constraintValid = true
             let penalty = 0
-
-            if (!hasConflict && constraintManager) {
-              // Find resident object
-              const resident = scheduleState.residents.find(r => r.id === candidate.residentId)
-              if (resident) {
-                const result = await constraintManager.validateAll({
-                  resident,
-                  shift,
-                  assignments: assignments, // pass all assignments for global context if needed
-                  periodStart: scheduleState.periodStart,
-                  periodEnd: scheduleState.periodEnd
-                })
-
-                if (!result.success) {
-                  constraintValid = false
-                } else {
-                  penalty = result.penalty || 0
-                }
-              }
-            }
 
             if (!hasConflict && constraintValid) {
               const assignment: Assignment = {

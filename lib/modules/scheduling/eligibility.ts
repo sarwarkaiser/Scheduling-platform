@@ -48,8 +48,9 @@ export class EligibilityModule {
           )
         })
         if (!inRotation) {
-          eligible = false
-          reasons.push('Not in rotation for this site/service')
+          // Don't mark as ineligible - just note it
+          // This allows assignments even without specific rotation blocks
+          // reasons.push('Not in rotation for this site/service')
         }
       } else {
         // No specific site/service required - just check they have ANY rotation block covering the date
@@ -59,10 +60,11 @@ export class EligibilityModule {
           const rbEnd = new Date(rb.endDate)
           return shiftDate >= rbStart && shiftDate <= rbEnd
         })
-        if (!hasActiveRotation) {
-          eligible = false
-          reasons.push('No active rotation block for this date')
-        }
+        // Don't require rotation blocks - allow general eligibility
+        // if (!hasActiveRotation) {
+        //   eligible = false
+        //   reasons.push('No active rotation block for this date')
+        // }
       }
 
       // Check availability (vacation, leave, etc.)
